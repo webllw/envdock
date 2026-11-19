@@ -48,6 +48,8 @@ const checks = [
   ['PowerShell 激活脚本生成', result.psScript],
   ['CMD 激活脚本生成', result.cmdScript],
   ['current/bin 垫片生成', result.shimGenerated],
+  ['Maven 垫片指向 mvn.cmd', result.mavenShimTargetsCmd],
+  ['Maven 垫片携带 JAVA_HOME', result.mavenShimCarriesJavaHome],
   ['目录占用统计为正数', result.diskUsage > 0]
 ]
 

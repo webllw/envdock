@@ -6,6 +6,7 @@
  */
 import type { AppConfig, ToolId, ToolProvider } from '@shared/domain'
 import { JavaProvider } from './java'
+import { MavenProvider } from './maven'
 import { PhpProvider } from './php'
 import { PythonProvider } from './python'
 import { GoProvider } from './go'
@@ -18,6 +19,7 @@ import { NodeProvider } from './node'
 export function createProviders(config: AppConfig): Map<ToolId, ToolProvider> {
   const providers = new Map<ToolId, ToolProvider>()
   providers.set('java', new JavaProvider(config))
+  providers.set('maven', new MavenProvider())
   providers.set('php', new PhpProvider(config))
   providers.set('python', new PythonProvider(config))
   providers.set('go', new GoProvider(config))

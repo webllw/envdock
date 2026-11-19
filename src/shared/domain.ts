@@ -6,7 +6,7 @@
  */
 
 /** 工具唯一标识，同时作为 runtimes 目录下的子目录名 */
-export type ToolId = 'java' | 'php' | 'python' | 'go' | 'node'
+export type ToolId = 'java' | 'maven' | 'php' | 'python' | 'go' | 'node'
 
 /** 版本记录的稳定性等级 */
 export type VersionChannel = 'stable' | 'lts' | 'preview'

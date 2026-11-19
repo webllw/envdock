@@ -10,10 +10,11 @@ import { rm } from 'node:fs/promises'
 import { IPC_CHANNELS, type ActivationRequest, type InstallRequest, type RelocateRequest } from '@shared/ipc'
 import type { ToolId } from '@shared/domain'
 import { parseRepoSlug } from '@shared/sources'
+import { TOOL_METADATA } from '@shared/tools'
 import { Engine } from './core/engine'
 import { normalizeTargetRoot } from './core/paths'
 
-const TOOL_IDS: ToolId[] = ['java', 'php', 'python', 'go', 'node']
+const TOOL_IDS: ToolId[] = TOOL_METADATA.map((item) => item.id)
 
 /** 窗口生命周期动作，由主进程注入，IPC 层不直接持有 BrowserWindow */
 export interface WindowActions {

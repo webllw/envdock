@@ -15,6 +15,7 @@ export interface ToolMeta {
 
 export const TOOL_METADATA: readonly ToolMeta[] = [
   { id: 'java', displayName: 'Java (Temurin)', accent: '#e8833a' },
+  { id: 'maven', displayName: 'Maven', accent: '#c0392b' },
   { id: 'php', displayName: 'PHP', accent: '#7b8fd4' },
   { id: 'python', displayName: 'Python', accent: '#f0c94c' },
   { id: 'go', displayName: 'Go', accent: '#4ab7d8' },

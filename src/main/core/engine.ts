@@ -141,7 +141,20 @@ export class Engine {
     return result
   }
 
+  /**
+   * 安装指定版本。
+   *
+   * Java 安装成功后自动附带一个 Maven：Maven 是 Java 项目的事实构建工具，
+   * 单独留出一步让用户再装不符合「装好 Java 即可开发」的预期。附带安装
+   * 只在尚未安装任何 Maven 时发生，且失败不回滚已完成的 Java 安装。
+   */
   async install(toolId: ToolId, versionId: string): Promise<void> {
+    await this.installVersion(toolId, versionId)
+    if (toolId === 'java') await this.ensureMavenInstalled()
+  }
+
+  /** 下载、校验并解压单个版本，进度事件直接使用工具与版本标识 */
+  private async installVersion(toolId: ToolId, versionId: string): Promise<void> {
     const provider = await this.requireProvider(toolId)
     const emit = this.emitProgress
 
@@ -172,6 +185,44 @@ export class Engine {
     await provider.install(version, archived, join(this.layout.runtimesDir, toolId, versionId))
 
     emit({ toolId, versionId, phase: 'done', percent: 100, message: '安装完成' })
+  }
+
+  /**
+   * 确保存在一个可用的 Maven 版本。
+   * 已装任意版本时跳过；否则取官方列表里最新的稳定版安装，并设为全局激活，
+   * 使 Java 装完后 mvn 命令立即可用。失败只记录警告，不影响 Java 安装结果。
+   */
+  private async ensureMavenInstalled(): Promise<void> {
+    const emit = this.emitProgress
+    try {
+      const installed = await this.detectTool('maven')
+      if (installed.length > 0) return
+
+      const versions = await this.listVersions('maven')
+      const stable = versions.find((item) => item.channel === 'stable')
+      if (!stable) throw new Error('官方源暂无稳定版 Maven')
+
+      await this.installVersion('maven', stable.id)
+      await this.store.updateState((draft) => {
+        draft.activeVersions.maven = stable.id
+      })
+      emit({
+        toolId: 'maven',
+        versionId: stable.id,
+        phase: 'done',
+        percent: 100,
+        message: `已附带安装 Maven ${stable.display}`
+      })
+    } catch (error) {
+      console.warn('[envdock] 附带安装 Maven 失败', error)
+      emit({
+        toolId: 'maven',
+        versionId: '',
+        phase: 'error',
+        percent: -1,
+        message: error instanceof Error ? error.message : '附带安装 Maven 失败'
+      })
+    }
   }
 
   async activate(toolId: ToolId, versionId: string): Promise<void> {
@@ -224,7 +275,12 @@ export class Engine {
     )
   }
 
-  /** 根据当前全局激活版本重建脚本与垫片 */
+  /**
+   * 根据当前全局激活版本重建脚本与垫片。
+   *
+   * 所有工具的环境变量先聚合再写入每个垫片：Maven 的 mvn.cmd 依赖 JAVA_HOME，
+   * 而各工具的变量键互不重叠，合并后任一命令都能拿到完整的运行时环境。
+   */
   private async refreshActivationArtifacts(): Promise<void> {
     const state = this.store.getState()
     const providers = this.providers()
@@ -246,6 +302,10 @@ export class Engine {
         envVars: plan.envVars
       })
     }
+
+    const mergedEnv: Record<string, string> = {}
+    for (const item of active) Object.assign(mergedEnv, item.envVars)
+    for (const item of active) item.envVars = { ...mergedEnv }
 
     await Promise.all([
       writeActivationScripts(this.layout, active),

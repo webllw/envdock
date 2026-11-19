@@ -19,6 +19,10 @@ export const OFFICIAL_SOURCES: Partial<Record<ToolId, OfficialSource>> = {
     label: 'Eclipse Adoptium 官方 API',
     url: 'https://api.adoptium.net/v3'
   },
+  maven: {
+    label: 'Maven Central 官方仓库',
+    url: 'https://repo.maven.apache.org/maven2'
+  },
   php: {
     label: 'windows.php.net 官方',
     url: 'https://windows.php.net/downloads/releases'

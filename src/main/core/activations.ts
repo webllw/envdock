@@ -12,16 +12,23 @@ import type { Layout } from './paths'
 
 /**
  * 各工具需要进入 PATH 的可执行文件；用于 current/bin 稳定垫片。
- * 垫片名对应版本目录内的 exe 名，路径由 relativeBinDir 拼出，
- * 因此这里只列 exe 名，不含扩展名。Python 的 pythonw 是无控制台入口，
- * pip 等 Scripts 下的脚本需先 ensurepip，不纳入垫片。
+ * 元素为「垫片名」与「版本目录内的目标文件名」二元组，默认目标为同名 .exe；
+ * Maven 的 mvn 是 .cmd 脚本，需显式指定目标扩展名，避免垫片指向不存在的 exe。
+ * Python 的 pythonw 是无控制台入口，pip 等 Scripts 下的脚本需先 ensurepip，不纳入垫片。
  */
-const SHIMS: Record<ToolId, string[]> = {
-  java: ['java', 'javac', 'jar'],
-  php: ['php'],
-  python: ['python', 'pythonw'],
-  go: ['go', 'gofmt'],
-  node: ['node']
+type ShimEntry = { name: string; target?: string }
+const SHIMS: Record<ToolId, ShimEntry[]> = {
+  java: [{ name: 'java' }, { name: 'javac' }, { name: 'jar' }],
+  maven: [{ name: 'mvn', target: 'mvn.cmd' }],
+  php: [{ name: 'php' }],
+  python: [{ name: 'python' }, { name: 'pythonw' }],
+  go: [{ name: 'go' }, { name: 'gofmt' }],
+  node: [{ name: 'node' }]
+}
+
+/** 垫片目标文件名：未显式指定时按同名 exe 处理 */
+function shimTarget(entry: ShimEntry): string {
+  return entry.target ?? `${entry.name}.exe`
 }
 
 export interface ActiveTool {
@@ -78,10 +85,11 @@ export async function writeCurrentShims(layout: Layout, active: ActiveTool[]): P
   await mkdir(layout.currentBinDir, { recursive: true })
 
   for (const item of active) {
-    const names = SHIMS[item.toolId]
-    if (names.length === 0) continue
+    const entries = SHIMS[item.toolId]
+    if (entries.length === 0) continue
 
-    for (const name of names) {
+    for (const entry of entries) {
+      const names = entry.name
       const envSetup = Object.entries(item.envVars)
         .map(([key, value]) => `set "${key}=%~dp0..\\..\\${value.replace(/\//g, '\\')}"`)
         .join('\r\n')
@@ -89,22 +97,22 @@ export async function writeCurrentShims(layout: Layout, active: ActiveTool[]): P
         '@echo off',
         'rem EnvDock 生成的版本垫片，指向当前激活版本',
         envSetup,
-        `set "ENVDOCK_EXE=%~dp0..\\..\\${item.relativeBinDir.replace(/\//g, '\\')}\\${name}.exe"`,
+        `set "ENVDOCK_EXE=%~dp0..\\..\\${item.relativeBinDir.replace(/\//g, '\\')}\\${shimTarget(entry)}"`,
         'if not exist "%ENVDOCK_EXE%" (',
-        `  echo EnvDock: ${name} 对应的版本已不存在，请重新激活 & exit /b 1`,
+        `  echo EnvDock: ${names} 对应的版本已不存在，请重新激活 & exit /b 1`,
         ')',
         '"%ENVDOCK_EXE%" %*'
       ]
         .filter(Boolean)
         .join('\r\n')
-      await writeFile(join(layout.currentBinDir, `${name}.cmd`), content, 'utf8')
+      await writeFile(join(layout.currentBinDir, `${names}.cmd`), content, 'utf8')
     }
   }
 
   // 环境变量展开后生成的垫片可能被误认为大型文本，这里保留一份说明供排查
   await writeFile(
     join(layout.scriptsDir, 'shims.txt'),
-    active.flatMap((item) => SHIMS[item.toolId].map((name) => `${item.toolId}: ${name}.cmd`)).join('\r\n') ||
+    active.flatMap((item) => SHIMS[item.toolId].map((entry) => `${item.toolId}: ${entry.name}.cmd`)).join('\r\n') ||
       '当前没有激活的工具',
     'utf8'
   )

@@ -34,17 +34,30 @@ export async function runHarness(root: string, archive: string) {
   const metadataWritten = await stat(join(targetDir, '.envdock-version.json')).then(() => true, () => false)
   const detected = (await detectInstalled(root, 'java')).length
 
-  const active: ActiveTool[] = [{
-    toolId: 'java',
-    relativeBinDir: `runtimes/java/${version.id}/bin`,
-    envVars: { JAVA_HOME: `runtimes/java/${version.id}` }
-  }]
+  const mergedEnv = { JAVA_HOME: `runtimes/java/${version.id}` }
+  const active: ActiveTool[] = [
+    {
+      toolId: 'java',
+      relativeBinDir: `runtimes/java/${version.id}/bin`,
+      envVars: { ...mergedEnv }
+    },
+    {
+      toolId: 'maven',
+      relativeBinDir: 'runtimes/maven/3.9.16/bin',
+      envVars: { ...mergedEnv, MAVEN_HOME: 'runtimes/maven/3.9.16' }
+    }
+  ]
   await writeActivationScripts(layout, active)
   await writeCurrentShims(layout, active)
 
   const psScript = (await readFile(join(layout.scriptsDir, 'activate.ps1'), 'utf8')).includes('$env:JAVA_HOME')
   const cmdScript = (await readFile(join(layout.scriptsDir, 'activate.bat'), 'utf8')).includes('set "JAVA_HOME=')
   const shimGenerated = (await readFile(join(layout.currentBinDir, 'java.cmd'), 'utf8')).includes('java.exe')
+
+  // Maven 的 mvn 是 .cmd 脚本，垫片必须指向 mvn.cmd，并带上 JAVA_HOME
+  const mvnShim = await readFile(join(layout.currentBinDir, 'mvn.cmd'), 'utf8')
+  const mavenShimTargetsCmd = mvnShim.includes('mvn.cmd') && !mvnShim.includes('mvn.exe')
+  const mavenShimCarriesJavaHome = mvnShim.includes('JAVA_HOME')
 
   const diskUsage = await store.diskUsage()
 
@@ -57,6 +70,8 @@ export async function runHarness(root: string, archive: string) {
     psScript,
     cmdScript,
     shimGenerated,
+    mavenShimTargetsCmd,
+    mavenShimCarriesJavaHome,
     diskUsage
   }
 }

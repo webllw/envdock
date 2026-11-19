@@ -1,6 +1,8 @@
 # EnvDock
 
-Windows 上集中管理多版本开发环境的桌面工具。Java、PHP、Python、Go、Node 的运行时和状态集中放在用户选定的目录，目录可整体迁移，卸载时按记录回滚对系统环境的改动。版本列表和安装包只取自各语言的官方接口。
+Windows 上集中管理多版本开发环境的桌面工具。Java、Maven、PHP、Python、Go、Node 的运行时和状态集中放在用户选定的目录，目录可整体迁移，卸载时按记录回滚对系统环境的改动。版本列表和安装包只取自各语言的官方接口。
+
+安装 Java 时会自动附带安装最新的稳定版 Maven，并配置 `JAVA_HOME` 与 `MAVEN_HOME`，装完即可执行 `mvn`。Maven 作为独立工具管理，可单独安装和切换多个版本。
 
 基于 Electron、React、TypeScript。
 
