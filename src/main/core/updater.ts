@@ -121,6 +121,12 @@ export function compareVersions(a: string, b: string): number {
  * 不再按 PID 轮询等待：PID 退出后会被系统回收复用，findstr 匹配数字会把
  * 复用的无关进程误判为原进程，陷入死循环并反复弹出控制台窗口。改为在
  * Windows 任务管理器可见的层面前强制结束同名进程，再短暂等待文件句柄释放。
+ *
+ * 目录改名分两步且逐步校验：备份用 ren（同目录原子改名，目标名已存在即失败），
+ * 就位用 move 但仅在上一步确认 app 已腾空后执行。move 到已存在的目录名会把
+ * 源目录移入其中（app 移进 app.old\app、staging 移进 app\staging），导致旧 exe
+ * 被启动、新版本被嵌套。任一步失败都走恢复分支把 app.old 改回 app，
+ * 并记录 error.flag，绝不在 app 缺失或版本不对时启动。
  */
 export function buildReplaceScript(params: {
   root: string
@@ -149,31 +155,55 @@ export function buildReplaceScript(params: {
     'rem 结束所有同名进程，确保 exe 与 app 目录没有句柄占用',
     `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
     'rem 给文件系统一点时间释放句柄',
-    'ping -n 2 127.0.0.1 >nul',
+    'ping -n 3 127.0.0.1 >nul',
     ''
   ]
 
   if (mode === 'upgrade') {
     lines.push(
-      'rem 备份当前应用本体',
-      `if exist ${q(backup)} rmdir /S /Q ${q(backup)}`,
-      `if exist ${q(app)} move /Y ${q(app)} ${q(backup)}`,
-      'rem 新版本就位',
-      `if not exist ${q(staging)} goto fail`,
-      `move /Y ${q(staging)} ${q(app)}`,
-      `if not errorlevel 1 goto launch`
+      'rem 备份：同目录原子改名，目标已存在或被占用时 ren 会失败',
+      `if exist ${q(backup)} rmdir /S /Q ${q(backup)} >nul 2>&1`,
+      'set /a TRY=0',
+      ':backup',
+      `if not exist ${q(app)} goto fail`,
+      `ren ${q(app)} app.old >nul 2>&1`,
+      'if not errorlevel 1 goto staged',
+      'set /a TRY+=1',
+      `if %TRY% GEQ 20 goto fail`,
+      'ping -n 2 127.0.0.1 >nul',
+      'goto backup',
+      '',
+      ':staged',
+      'rem 就位：此时 app 已腾空，move 才是改名而非移入子目录',
+      `if not exist ${q(staging)} goto recover`,
+      `move /Y ${q(staging)} ${q(app)} >nul 2>&1`,
+      'if errorlevel 1 goto recover',
+      `if not exist ${q(app)} goto recover`,
+      `if not exist ${q(exe)} goto recover`,
+      'goto launch'
     )
   } else {
     lines.push(
-      'rem 回滚：当前应用丢弃，旧版本就位',
+      'rem 回滚：丢弃当前破损应用，把备份改名回 app',
       `if not exist ${q(backup)} goto fail`,
-      `if exist ${q(app)} rmdir /S /Q ${q(app)}`,
-      `move /Y ${q(backup)} ${q(app)}`,
-      `if not errorlevel 1 goto launch`
+      `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
+      `ren ${q(backup)} app >nul 2>&1`,
+      'if errorlevel 1 goto fail',
+      `if not exist ${q(exe)} goto fail`,
+      'goto launch'
     )
   }
 
   lines.push(
+    'rem 升级中途失败：把已改名的备份恢复为 app，绝不留下空 app',
+    ':recover',
+    `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
+    `if not exist ${q(backup)} goto fail`,
+    `ren ${q(backup)} app >nul 2>&1`,
+    'if errorlevel 1 goto fail',
+    'echo upgrade recovered, no new version > "%ROOT%\\updates\\error.flag"',
+    'goto fail',
+    '',
     ':fail',
     'echo updater failed > "%ROOT%\\updates\\error.flag"',
     'goto end',
@@ -190,9 +220,14 @@ export function buildReplaceScript(params: {
     'goto confirm',
     '',
     ':rollback',
-    'taskkill /F /IM EnvDock.exe >nul 2>&1',
-    `if exist ${q(app)} rmdir /S /Q ${q(app)}`,
-    `if exist ${q(backup)} move /Y ${q(backup)} ${q(app)}`,
+    `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
+    'ping -n 3 127.0.0.1 >nul',
+    'rem 回滚也用 ren，且确认备份存在，避免删除当前 app 后无版本可启',
+    `if not exist ${q(backup)} goto fail`,
+    `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
+    `ren ${q(backup)} app >nul 2>&1`,
+    'if errorlevel 1 goto fail',
+    `if not exist ${q(exe)} goto fail`,
     `start "" ${q(exe)}`,
     'echo rolled back > "%ROOT%\\updates\\error.flag"',
     '',

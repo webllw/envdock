@@ -48,9 +48,15 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     !upgradeScript.includes('findstr') && !upgradeScript.includes(':wait_exit')
   const silentLauncher = buildSilentLauncher('C:\\tmp\\replace.bat').includes('WScript.Shell') &&
     buildSilentLauncher('C:\\tmp\\replace.bat').includes(', 0, False')
-  const scriptUpgradeOk = upgradeScript.includes('move') &&
+  // 备份用 ren（目标存在即失败），就位用 move 但必须校验 exe；失败走 :recover，绝不启动空 app
+  const backupByRename = upgradeScript.includes(`ren "${root}\\app" app.old`) &&
+    upgradeScript.includes(':backup') && upgradeScript.includes(':recover')
+  const verifyBeforeLaunch = upgradeScript.includes(`if not exist "${root}\\app\\${appName()}" goto recover`) &&
+    upgradeScript.includes(`if not exist "${root}\\app\\${appName()}" goto fail`)
+  const scriptUpgradeOk = upgradeScript.includes('move') && backupByRename && verifyBeforeLaunch &&
     upgradeScript.includes(appName()) && upgradeScript.includes(':rollback') && killsByName
-  const scriptRollbackOk = rollbackScript.includes('app.old') && rollbackScript.includes(':launch') && killsByName
+  const scriptRollbackOk = rollbackScript.includes('app.old') && rollbackScript.includes(':launch') &&
+    rollbackScript.includes(`ren "${root}\\app.old" app`) && killsByName
 
   // 5. 配置更新源并跑真实 HTTP 检查 + 下载 + 校验 + 解压
   await store.updateState((draft) => {
