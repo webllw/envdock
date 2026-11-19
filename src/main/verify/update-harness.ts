@@ -5,7 +5,7 @@ import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
 import { Updater, compareVersions, buildReplaceScript } from '@main/core/updater'
 
-export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, apiBase: string) {
+export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, webBase: string) {
   const layout = createLayout(root)
   const store = new Store(layout, '0.1.0')
   await store.init()
@@ -58,7 +58,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     appVersion: '0.1.0',
     emit: (state) => events.push(state.phase),
     restart: () => undefined,
-    apiBase
+    webBase
   })
 
   const manifest = await updater.check()

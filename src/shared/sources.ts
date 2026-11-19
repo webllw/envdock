@@ -49,8 +49,8 @@ export function officialSource(toolId: ToolId): OfficialSource | null {
 /** 应用自身更新所用的默认仓库 */
 export const DEFAULT_UPDATE_REPO = 'https://github.com/webllw/envdock'
 
-/** GitHub Releases API 根地址 */
-export const GITHUB_API_BASE = 'https://api.github.com'
+/** GitHub 网页根地址：Atom feed 与发布资产下载都走这里，不占用 API 匿名配额 */
+export const GITHUB_WEB_BASE = 'https://github.com'
 
 /**
  * 把仓库地址解析为 owner/repo。
@@ -67,16 +67,37 @@ export function parseRepoSlug(input: string): { owner: string; repo: string } | 
   return { owner, repo }
 }
 
-/** 由仓库地址得到 releases/latest 接口地址；地址不合法时返回 null */
-export function latestReleaseUrl(input: string): string | null {
+/**
+ * 版本发现地址：Releases Atom feed。
+ *
+ * 相比 releases/latest API，feed 不受匿名 60 次/小时配额限制；用户走代理时出口 IP
+ * 由多人共享，API 配额几乎必然被他人耗尽，而 feed 不受这一约束。
+ */
+export function latestReleaseFeedUrl(input: string): string | null {
   const slug = parseRepoSlug(input)
-  return slug ? `${GITHUB_API_BASE}/repos/${slug.owner}/${slug.repo}/releases/latest` : null
+  return slug ? `${GITHUB_WEB_BASE}/${slug.owner}/${slug.repo}/releases.atom` : null
+}
+
+/** 发布资产的下载直链；tag 保留原始形式（含 v 前缀）以匹配 GitHub 的下载地址 */
+export function releaseAssetUrl(input: string, tag: string, fileName: string): string | null {
+  const slug = parseRepoSlug(input)
+  return slug
+    ? `${GITHUB_WEB_BASE}/${slug.owner}/${slug.repo}/releases/download/${tag}/${fileName}`
+    : null
+}
+
+/**
+ * 升级包资产名。发布流程按此命名上传，Atom feed 不携带资产列表，
+ * 客户端据此拼接下载地址，命名约定是两端共同的契约。
+ */
+export function upgradeAssetName(version: string): string {
+  return `EnvDock-${version}-app.zip`
 }
 
 /** 由仓库地址得到用户可点击的 Releases 页面地址 */
 export function releasesPageUrl(input: string): string | null {
   const slug = parseRepoSlug(input)
-  return slug ? `https://github.com/${slug.owner}/${slug.repo}/releases` : null
+  return slug ? `${GITHUB_WEB_BASE}/${slug.owner}/${slug.repo}/releases` : null
 }
 
 /** 地址可靠性说明：官方接口固定标注为可信，并如实反映是否走 HTTPS */

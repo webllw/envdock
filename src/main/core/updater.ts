@@ -34,8 +34,8 @@ export interface UpdaterOptions {
   emit: (state: UpdateState) => void
   /** 请求应用退出；替换脚本负责随后启动新版本 */
   restart: () => void
-  /** GitHub API 根地址覆盖，仅用于验证环境指向本地服务 */
-  apiBase?: string
+  /** GitHub 网页根地址覆盖，仅用于验证环境指向本地服务 */
+  webBase?: string
 }
 
 /** 比较语义化版本号，a 大于 b 返回 1，相等返回 0，小于返回 -1 */
@@ -225,7 +225,7 @@ export class Updater {
       const manifest = await fetchLatestRelease({
         sourceUrl: source,
         appVersion: this.options.appVersion,
-        apiBase: this.options.apiBase
+        webBase: this.options.webBase
       })
       if (!manifest) {
         this.available = null

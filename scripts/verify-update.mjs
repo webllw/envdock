@@ -1,15 +1,15 @@
 /**
  * 升级引擎端到端验证。
  *
- * 在本地临时目录起一个 HTTP 服务模拟 GitHub Releases API，返回 release 元数据
- * 与升级包资产，用 esbuild 现场打包升级 harness 后执行：覆盖配置迁移、版本比较、
- * 检查、下载校验解压、挂起状态持久化、启动确认、manifest 路径回填。
+ * 在本地临时目录起一个 HTTP 服务模拟 GitHub Releases Atom feed 与资产下载直链，
+ * 用 esbuild 现场打包升级 harness 后执行：覆盖配置迁移、版本比较、检查、
+ * 下载校验解压、挂起状态持久化、启动确认、manifest 路径回填。
  * 不启动 Electron，不改系统 PATH。
  */
 import { build } from 'esbuild'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -27,32 +27,29 @@ const packageName = 'EnvDock-0.2.0-app.zip'
 const packagePath = join(sourceDir, packageName)
 zip.writeZip(packagePath)
 const sha256 = createHash('sha256').update(await readFile(packagePath)).digest('hex')
-const sizeBytes = (await readFile(packagePath)).length
+await writeFile(`${packagePath}.sha256`, `${sha256}  ${packageName}\n`, 'ascii')
 
 let port = 0
-const release = {
-  tag_name: 'v0.2.0',
-  body: '验证用新版本',
-  published_at: '2026-11-18T00:00:00Z',
-  draft: false,
-  prerelease: false,
-  assets: [{
-    name: packageName,
-    size: sizeBytes,
-    digest: `sha256:${sha256}`,
-    browser_download_url: `http://127.0.0.1:${port}/assets/${packageName}`
-  }]
-}
+const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Release notes from envdock</title>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v0.2.0</id>
+    <updated>2026-11-18T00:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/webllw/envdock/releases/tag/v0.2.0"/>
+    <title>EnvDock 0.2.0</title>
+    <content type="html">&lt;p&gt;验证用新版本&lt;/p&gt;</content>
+  </entry>
+</feed>`
 
 const server = createServer(async (req, res) => {
   const path = req.url ?? ''
-  if (path.startsWith('/repos/') && path.endsWith('/releases/latest')) {
-    const body = JSON.stringify(release)
-    res.writeHead(200, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) })
-    res.end(body)
+  if (path.endsWith('/releases.atom')) {
+    res.writeHead(200, { 'content-type': 'application/atom+xml', 'content-length': String(Buffer.byteLength(feed)) })
+    res.end(feed)
     return
   }
-  const name = path.replace(/^\/assets\//, '')
+  const name = path.replace(/^.*\//, '')
   const file = join(sourceDir, name)
   try {
     const data = await readFile(file)
@@ -66,9 +63,8 @@ const server = createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const address = server.address()
 port = typeof address === 'object' && address ? address.port : 0
-release.assets[0].browser_download_url = `http://127.0.0.1:${port}/assets/${packageName}`
 const sourceUrl = 'https://github.com/webllw/envdock'
-const apiBase = `http://127.0.0.1:${port}`
+const webBase = `http://127.0.0.1:${port}`
 
 const bundlePath = join(root, 'harness.cjs')
 await build({
@@ -87,7 +83,7 @@ await build({
 
 const { runUpdateHarness } = createRequire(import.meta.url)(bundlePath)
 const envRoot = join(root, 'envdock-data')
-const result = await runUpdateHarness(envRoot, sourceUrl, packageName, apiBase)
+const result = await runUpdateHarness(envRoot, sourceUrl, packageName, webBase)
 server.close()
 
 const checks = [
@@ -99,7 +95,7 @@ const checks = [
   ['语义版本比较', result.compareOk],
   ['升级替换脚本内容正确', result.scriptUpgradeOk],
   ['回滚替换脚本内容正确', result.scriptRollbackOk],
-  ['HTTP 检查发现新版本', result.checkOk],
+  ['Atom feed 检查发现新版本', result.checkOk],
   ['下载校验解压完成', result.prepareOk],
   ['升级包落盘缓存', result.downloadOk],
   ['staging 含应用本体', result.stagedOk],
