@@ -99,74 +99,7 @@ release/EnvDock/
 
 ## 发布新版本
 
-### 更新版本号
-
-修改 `package.json` 的 `version` 字段，以及 `package-lock.json` 顶层和 `packages[""].version` 两处。应用内建版本取自 `package.json`，`version.json` 在首次启动时写入同一值。
-
-### 提交并打标签
-
-```bash
-git add -A
-git commit -m "发布 1.0.1"
-git tag -a v1.0.1 -m "EnvDock 1.0.1"
-```
-
-标签名使用 `v` 加版本号，与 `package.json` 对应。GitHub Release 依据标签创建，应用比较版本时会去掉 `v` 前缀。
-
-### 推送到 GitHub
-
-首次推送前确认远端：
-
-```bash
-git remote add origin https://github.com/webllw/envdock.git
-git branch -M main
-```
-
-远端为空时：
-
-```bash
-git push -u origin main
-git push origin v1.0.0
-```
-
-远端已有初始化提交（例如创建仓库时生成的 README）且与本地历史无关时，先合并再推送：
-
-```bash
-git fetch origin
-git merge origin/main --allow-unrelated-histories
-git push -u origin main
-git push origin v1.0.0
-```
-
-后续版本正常推送分支和标签：
-
-```bash
-git push
-git push origin v1.0.1
-```
-
-提交身份通过 `git config user.name` 与 `git config user.email` 查看和修改，推送前确认其符合公开仓库的要求。
-
-### 制作升级包
-
-升级包只包含应用本体，不包含运行时与状态数据。把 `release/win-unpacked` 的内容打成 zip，文件名带上版本并含 `app`，例如 `EnvDock-1.0.1-app.zip`。应用解压后将其整体放到 `app/`；如果包内多包了一层 `app/` 目录，解压时会自动剥离。
-
-```powershell
-# PowerShell
-Compress-Archive -Path release\win-unpacked\* -DestinationPath EnvDock-1.0.1-app.zip
-```
-
-### 创建 Release
-
-在 GitHub 仓库的 Releases 页面选择对应标签，上传上一步生成的 zip 后发布。也可以用命令行：
-
-```bash
-gh release create v1.0.1 EnvDock-1.0.1-app.zip --title "EnvDock 1.0.1" --notes "本次更新说明"
-```
-
-GitHub 会为上传的资产自动计算 SHA-256 并在 API 中返回 `digest`，应用读取该值校验升级包。资产没有 digest 时，应用会尝试读取同名的 `.sha256` 附件；两者都缺失则拒绝升级。
-
-应用设置页的「更新仓库」默认指向 `webllw/envdock`，检查更新时请求该仓库的 `releases/latest`。发布后客户端即可发现新版本。
+版本号同步、打包升级包、创建 GitHub Release 与推送流程见 `../RELEASE.md`。发布后客户端即可从默认仓库 `webllw/envdock` 的 `releases/latest` 发现新版本。
 
 ## 使用
 
