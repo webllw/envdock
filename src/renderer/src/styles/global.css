@@ -1,0 +1,185 @@
+/* 默认浅色主题。所有颜色集中在此，组件样式只引用变量，便于整体换肤 */
+:root {
+  color-scheme: light;
+
+  --bg-base: #f5f7fa;
+  --bg-surface: #ffffff;
+  --bg-raised: #f9fbfd;
+  --bg-hover: #eef2f7;
+  --bg-input: #f4f7fb;
+
+  --border-subtle: #e6ebf2;
+  --border-default: #d6dfe9;
+  --border-strong: #b6c4d4;
+
+  --text-primary: #1b2735;
+  --text-secondary: #5b6e84;
+  --text-tertiary: #94a3b5;
+
+  --accent: #0f9d8c;
+  --accent-strong: #0b8577;
+  --accent-soft: rgba(15, 157, 140, 0.1);
+  --accent-border: rgba(15, 157, 140, 0.38);
+  --on-accent: #ffffff;
+  --accent-glow: rgba(15, 157, 140, 0.06);
+
+  --ok: #128a63;
+  --ok-soft: rgba(18, 138, 99, 0.11);
+  --ok-glow: rgba(18, 138, 99, 0.32);
+  --warning: #b9781a;
+  --warning-soft: rgba(185, 120, 26, 0.11);
+  --warning-glow: rgba(185, 120, 26, 0.3);
+  --error: #d44953;
+  --error-soft: rgba(212, 73, 83, 0.09);
+  --error-border: rgba(212, 73, 83, 0.36);
+  --error-glow: rgba(212, 73, 83, 0.32);
+
+  --sidebar-bg: rgba(255, 255, 255, 0.55);
+  --footer-bg: #fafcfe;
+  --backdrop: rgba(24, 38, 56, 0.38);
+
+  --card-shadow: 0 1px 2px rgba(27, 39, 53, 0.04);
+  --shadow-panel: 0 12px 36px rgba(27, 45, 68, 0.16);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+
+/* 深色主题用深蓝灰而非纯黑，降低长时间注视的对比疲劳 */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-base: #151c27;
+  --bg-surface: #1d2634;
+  --bg-raised: #243043;
+  --bg-hover: #2a384c;
+  --bg-input: #18212d;
+
+  --border-subtle: #293548;
+  --border-default: #37465a;
+  --border-strong: #4a5c73;
+
+  --text-primary: #e8eef6;
+  --text-secondary: #a2b2c5;
+  --text-tertiary: #72849c;
+
+  --accent: #45d8c3;
+  --accent-strong: #5fe6d3;
+  --accent-soft: rgba(69, 216, 195, 0.13);
+  --accent-border: rgba(69, 216, 195, 0.36);
+  --on-accent: #08130f;
+  --accent-glow: rgba(69, 216, 195, 0.06);
+
+  --ok: #4bd3a0;
+  --ok-soft: rgba(75, 211, 160, 0.14);
+  --ok-glow: rgba(75, 211, 160, 0.5);
+  --warning: #e8b454;
+  --warning-soft: rgba(232, 180, 84, 0.12);
+  --warning-glow: rgba(232, 180, 84, 0.5);
+  --error: #ef6b73;
+  --error-soft: rgba(239, 107, 115, 0.12);
+  --error-border: rgba(239, 107, 115, 0.4);
+  --error-glow: rgba(239, 107, 115, 0.5);
+
+  --sidebar-bg: rgba(29, 38, 52, 0.5);
+  --footer-bg: rgba(20, 28, 40, 0.5);
+  --backdrop: rgba(4, 8, 13, 0.7);
+
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-panel: 0 12px 36px rgba(0, 0, 0, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  transition: background 0.2s, color 0.2s;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.spin { animation: spin 1s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.app-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 60vh;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.app-loading > svg { color: var(--accent); }
+
+.backend-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius-md);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: 12px;
+}

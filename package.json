@@ -1,0 +1,59 @@
+{
+  "name": "envdock",
+  "version": "1.0.0",
+  "description": "集中式多语言开发环境管理工具",
+  "productName": "EnvDock",
+  "license": "MIT",
+  "author": "EnvDock contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webllw/envdock.git"
+  },
+  "keywords": [
+    "electron",
+    "runtime",
+    "version-manager",
+    "windows",
+    "java",
+    "php",
+    "python",
+    "go",
+    "node"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build && electron-builder --dir --win --config electron-builder.yml && node scripts/assemble-portable.mjs",
+    "verify:engine": "node scripts/verify-engine.mjs",
+    "verify:update": "node scripts/verify-update.mjs"
+  },
+  "build": {
+    "asar": true
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "undici": "^6.29.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^30.5.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

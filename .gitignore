@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+release/
+release-*/
+.envdock-data/
+.edge-tmp/
+.workbuddy/
+*.log
+.DS_Store
+*.local
