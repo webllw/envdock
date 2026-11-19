@@ -82,6 +82,21 @@ export async function fetchLatestRelease(options: {
     signal: AbortSignal.timeout(30_000)
   })
   if (response.status === 404) return null
+  // 匿名 API 限额 60 次/小时，走代理时出口 IP 由多人共享，极易触发 403/429。
+  // 原始 HTTP 状态码对用户没有可操作性，这里区分限流并给出明确的处置方向。
+  if (response.status === 403 || response.status === 429) {
+    let detail = ''
+    try {
+      const body = (await response.json()) as { message?: string }
+      detail = body.message ?? ''
+    } catch {
+      // 响应体非 JSON 时忽略，仍按状态码给出提示
+    }
+    if (/rate limit|abuse|secondary/i.test(detail)) {
+      throw new Error('GitHub API 匿名配额已用尽（共享出口 IP 常见），请稍后重试或关闭代理改用直连')
+    }
+    throw new Error(`GitHub Releases 请求被拒绝：HTTP ${response.status}${detail ? `（${detail}）` : ''}`)
+  }
   if (!response.ok) throw new Error(`GitHub Releases 请求失败：HTTP ${response.status}`)
 
   const release = (await response.json()) as GitHubRelease

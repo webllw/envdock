@@ -85,7 +85,7 @@ interface AppState {
   migrate: (targetRoot: string) => Promise<void>
   chooseDirectory: (title?: string) => Promise<string | null>
   uninstallAll: () => Promise<void>
-  checkUpdate: () => Promise<UpdateManifest | null>
+  checkUpdate: (silent?: boolean) => Promise<UpdateManifest | null>
   applyUpdate: () => Promise<void>
   rollbackUpdate: () => Promise<void>
   discardOldVersion: () => Promise<void>
@@ -352,15 +352,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  checkUpdate: async () => {
+  checkUpdate: async (silent = false) => {
     try {
       const manifest = await api.checkUpdate()
-      if (!manifest) {
+      if (!manifest && !silent) {
         get().showToast('当前已是最新版本', 'info')
       }
       return manifest
     } catch (error) {
-      get().showToast(error instanceof Error ? error.message : '检查更新失败', 'warning')
+      // 启动时的自动检查失败不打扰用户；失败原因仍写入 update state 供设置页查看
+      if (!silent) {
+        get().showToast(error instanceof Error ? error.message : '检查更新失败', 'warning')
+      }
       return null
     }
   },

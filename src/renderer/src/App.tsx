@@ -22,7 +22,7 @@ export default function App() {
   useEffect(() => {
     void initialize().then(() => {
       void loadUpdateState().then(() => {
-        if (useAppStore.getState().config.update.autoCheck) void checkUpdate()
+        if (useAppStore.getState().config.update.autoCheck) void checkUpdate(true)
       })
     })
     const offProgress = api.onProgress(handleProgressEvent)
