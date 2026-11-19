@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { readFile, stat } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
-import { Updater, compareVersions, buildReplaceScript } from '@main/core/updater'
+import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher } from '@main/core/updater'
 
 export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, webBase: string) {
   const layout = createLayout(root)
@@ -41,11 +41,16 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareVersions('0.1.0', '0.2.0') === -1
 
   // 4. 替换脚本内容：升级分支含备份与就位，回滚分支含旧版本恢复
-  const upgradeScript = buildReplaceScript({ root, pid: 12345, mode: 'upgrade' })
-  const rollbackScript = buildReplaceScript({ root, pid: 12345, mode: 'rollback' })
+  const upgradeScript = buildReplaceScript({ root, mode: 'upgrade' })
+  const rollbackScript = buildReplaceScript({ root, mode: 'rollback' })
+  // 替换脚本必须按进程名强制结束残留实例，不能再用 PID + findstr 轮询（会死循环弹窗）
+  const killsByName = upgradeScript.includes(`taskkill /F /IM ${appName()}`) &&
+    !upgradeScript.includes('findstr') && !upgradeScript.includes(':wait_exit')
+  const silentLauncher = buildSilentLauncher('C:\\tmp\\replace.bat').includes('WScript.Shell') &&
+    buildSilentLauncher('C:\\tmp\\replace.bat').includes(', 0, False')
   const scriptUpgradeOk = upgradeScript.includes('move') &&
-    upgradeScript.includes(appName()) && upgradeScript.includes(':rollback')
-  const scriptRollbackOk = rollbackScript.includes('app.old') && rollbackScript.includes(':launch')
+    upgradeScript.includes(appName()) && upgradeScript.includes(':rollback') && killsByName
+  const scriptRollbackOk = rollbackScript.includes('app.old') && rollbackScript.includes(':launch') && killsByName
 
   // 5. 配置更新源并跑真实 HTTP 检查 + 下载 + 校验 + 解压
   await store.updateState((draft) => {
@@ -105,6 +110,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareOk,
     scriptUpgradeOk,
     scriptRollbackOk,
+    silentLauncher,
     checkOk,
     prepareOk,
     stagedOk,

@@ -38,6 +38,20 @@ export interface UpdaterOptions {
   webBase?: string
 }
 
+/**
+ * 生成静默启动器。Node 的 windowsHide 对 detached 的 cmd /C 并非在所有 Windows
+ * 版本上都生效，替换脚本执行期间会闪出甚至停留一个控制台窗口。VBS 的 Run 以
+ * 窗口样式 0 启动脚本，可确保全程无窗口；//B 让 wscript 自身不弹对话框。
+ */
+export function buildSilentLauncher(scriptPath: string): string {
+  const escaped = scriptPath.replace(/"/g, '""')
+  return [
+    'Set ws = CreateObject("WScript.Shell")',
+    `ws.Run "${escaped}", 0, False`,
+    ''
+  ].join('\r\n')
+}
+
 /** 比较语义化版本号，a 大于 b 返回 1，相等返回 0，小于返回 -1 */
 export function compareVersions(a: string, b: string): number {
   const parse = (value: string): number[] =>
@@ -60,17 +74,20 @@ export function compareVersions(a: string, b: string): number {
  * 生成进程外替换脚本。
  *
  * Windows 无法覆盖正在运行的 exe，脚本必须在主进程退出后执行：
- * 等 PID 消失 → 备份 app → 就位新版本 → 启动 → 轮询确认文件 →
+ * 先结束同名残留进程 → 备份 app → 就位新版本 → 启动 → 轮询确认文件 →
  * 超时则回滚。所有路径在生成时展开为绝对路径；脚本是一次性临时文件，
  * 不参与目录迁移，因此可以安全写死。
+ *
+ * 不再按 PID 轮询等待：PID 退出后会被系统回收复用，findstr 匹配数字会把
+ * 复用的无关进程误判为原进程，陷入死循环并反复弹出控制台窗口。改为在
+ * Windows 任务管理器可见的层面前强制结束同名进程，再短暂等待文件句柄释放。
  */
 export function buildReplaceScript(params: {
   root: string
-  pid: number
   mode: 'upgrade' | 'rollback'
   timeoutTicks?: number
 }): string {
-  const { root, pid, mode } = params
+  const { root, mode } = params
   const ticks = params.timeoutTicks ?? CONFIRM_WAIT_TICKS
   const app = join(root, 'app')
   const backup = join(root, 'app.old')
@@ -89,13 +106,10 @@ export function buildReplaceScript(params: {
     `set "CONFIRM=${confirm}"`,
     `set "EXE=${exe}"`,
     '',
-    'rem 等待主进程退出，避免覆盖正在运行的 exe',
-    ':wait_exit',
-    `tasklist /FI "PID eq ${pid}" 2>nul | findstr /I "${pid}" >nul`,
-    'if not errorlevel 1 (',
-    '  ping -n 2 127.0.0.1 >nul',
-    '  goto wait_exit',
-    ')',
+    'rem 结束所有同名进程，确保 exe 与 app 目录没有句柄占用',
+    `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
+    'rem 给文件系统一点时间释放句柄',
+    'ping -n 2 127.0.0.1 >nul',
     ''
   ]
 
@@ -212,6 +226,35 @@ export class Updater {
     return this.options.store.getState().config.update.sourceUrl.trim().replace(/\/+$/, '')
   }
 
+  /** 写替换脚本与静默启动器并在后台拉起；VBS 负责隐藏脚本执行窗口 */
+  private async launchReplaceScript(mode: 'upgrade' | 'rollback'): Promise<void> {
+    const script = join(this.options.layout.updatesDir, 'replace.bat')
+    await writeFile(script, buildReplaceScript({
+      root: this.options.layout.root,
+      mode
+    }), 'utf8')
+    const launcher = join(this.options.layout.updatesDir, 'run-silent.vbs')
+    await writeFile(launcher, buildSilentLauncher(script), 'utf8')
+
+    // 优先用 wscript 静默执行；不可用时退回 cmd.exe，仍保留 windowsHide
+    const child = spawn('wscript.exe', ['//B', launcher], {
+      cwd: this.options.layout.root,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    })
+    child.once('error', () => {
+      const fallback = spawn('cmd.exe', ['/C', script], {
+        cwd: this.options.layout.root,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      fallback.unref()
+    })
+    child.unref()
+  }
+
   /** 从 GitHub Releases 拉取最新发布，与内建版本比较；已是最新返回 null */
   async check(): Promise<UpdateManifest | null> {
     const source = this.sourceUrl()
@@ -321,21 +364,8 @@ export class Updater {
     })
     await rm(this.options.layout.updateConfirmFile, { force: true })
 
-    const script = join(this.options.layout.updatesDir, 'replace.bat')
-    await writeFile(script, buildReplaceScript({
-      root: this.options.layout.root,
-      pid: process.pid,
-      mode: 'upgrade'
-    }), 'utf8')
-
     this.publish({ phase: 'restarting', percent: 100, message: '正在重启以完成升级' })
-    const child = spawn('cmd.exe', ['/C', script], {
-      cwd: this.options.layout.root,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    })
-    child.unref()
+    await this.launchReplaceScript('upgrade')
     this.options.restart()
     return this.state()
   }
@@ -389,21 +419,8 @@ export class Updater {
     })
     await rm(this.options.layout.updateConfirmFile, { force: true })
 
-    const script = join(this.options.layout.updatesDir, 'replace.bat')
-    await writeFile(script, buildReplaceScript({
-      root: this.options.layout.root,
-      pid: process.pid,
-      mode: 'rollback'
-    }), 'utf8')
-
     this.publish({ phase: 'restarting', message: '正在回滚', percent: 100 })
-    const child = spawn('cmd.exe', ['/C', script], {
-      cwd: this.options.layout.root,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    })
-    child.unref()
+    await this.launchReplaceScript('rollback')
     this.options.restart()
   }
 
