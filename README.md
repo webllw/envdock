@@ -41,6 +41,30 @@ $env:ENVDOCK_ROOT = "D:\envdock-dev"
 npm run dev
 ```
 
+## 使用
+
+把绿色目录复制到目标磁盘即可运行。首次启动选定安装目录。运行时页用于安装版本、设为全局、取消全局和卸载。同一工具可以同时存在多个版本，全局版本只有一个。
+
+设置页包含五部分：
+
+- 应用更新：检查 GitHub Releases 上的新版本，升级只替换 `app/`；可更换更新仓库、开关启动检查、回滚或清理上一版本。
+- 网络代理：填写 HTTP 代理地址，开启后版本列表与安装包下载都走代理，关闭则直连。
+- 安装目录：迁移到新位置，旧路径引用按清单撤销，文件与配置原样搬到新目录。
+- 环境集成：是否把 `current/bin` 写入用户级 PATH。关闭时用激活脚本按需启用。
+- 系统变更清单：记录 EnvDock 写过的 PATH 项与注册表值，卸载时逐项恢复原值。
+
+激活脚本只影响运行它的终端会话，不修改系统环境。
+
+```bat
+# cmd
+call <安装目录>\scripts\activate.bat
+```
+
+```powershell
+# PowerShell
+. <安装目录>\scripts\activate.ps1
+```
+
 ## 项目结构
 
 ```
@@ -72,7 +96,7 @@ npm run verify:update
 
 出网请求统一走 `src/main/core/net.ts` 的 `requestFetch`，它按设置里的代理配置注入 dispatcher。新增网络请求时使用它而不是直接调用 `fetch`，否则代理设置对该请求无效。
 
-## 打包
+### 打包
 
 ```bash
 npm run package
@@ -93,41 +117,13 @@ release/EnvDock/
   version.json       当前应用版本
 ```
 
-`manifest.json` 的 `installRoot` 在首次启动时按实际位置回填。把整个目录复制到任意磁盘即可使用，升级时只替换 `app/`，其余数据保持不变。
+`manifest.json` 的 `installRoot` 在首次启动时按实际位置回填。整个目录可以复制到任意磁盘。
 
 国内网络下载 Electron 二进制较慢时，可设置 `ELECTRON_MIRROR` 后再打包。
-
-## 发布新版本
-
-版本号同步、打包升级包、创建 GitHub Release 与推送流程见 `../RELEASE.md`。发布后客户端即可从默认仓库 `webllw/envdock` 的 `releases/latest` 发现新版本。
-
-## 使用
-
-把绿色目录复制到目标磁盘即可运行。首次启动选定安装目录，目录结构如上。运行时页用于安装版本、设为全局、取消全局和卸载。同一工具可以同时存在多个版本，全局版本只有一个。
-
-设置页包含五部分：
-
-- 应用更新：检查 GitHub Releases 上的新版本，升级只替换 `app/`；可更换更新仓库、开关启动检查、回滚或清理上一版本。
-- 网络代理：填写 HTTP 代理地址，开启后版本列表与安装包下载都走代理，关闭则直连。
-- 安装目录：迁移到新位置，旧路径引用按清单撤销，文件与配置原样搬到新目录。
-- 环境集成：是否把 `current/bin` 写入用户级 PATH。关闭时用激活脚本按需启用。
-- 系统变更清单：记录 EnvDock 写过的 PATH 项与注册表值，卸载时逐项恢复原值。
-
-激活脚本只影响运行它的终端会话，不修改系统环境。
-
-```bat
-# cmd
-call <安装目录>\scripts\activate.bat
-```
-
-```powershell
-# PowerShell
-. <安装目录>\scripts\activate.ps1
-```
 
 ## 限制
 
 - 仅支持 Windows x64。
 - 版本列表和安装包都来自官方源，不提供镜像切换。网络受限时需要配置 HTTP 代理。
-- 应用更新从 GitHub Releases 获取，默认仓库为 `webllw/envdock`，可在设置中改为自己的仓库。发布时需要附带 zip 升级包（文件名含 `app`）及其 SHA-256 校验值。
+- 应用更新从 GitHub Releases 获取，默认仓库为 `webllw/envdock`，可在设置中改为自己的仓库。
 - 全局垫片只包含可执行文件。`npm`、`npx` 这类脚本命令需要在激活脚本启动的终端会话中使用。
