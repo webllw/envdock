@@ -42,6 +42,39 @@ export function officialSource(toolId: ToolId): OfficialSource | null {
   return OFFICIAL_SOURCES[toolId] ?? null
 }
 
+/** 应用自身更新所用的默认仓库 */
+export const DEFAULT_UPDATE_REPO = 'https://github.com/webllw/envdock'
+
+/** GitHub Releases API 根地址 */
+export const GITHUB_API_BASE = 'https://api.github.com'
+
+/**
+ * 把仓库地址解析为 owner/repo。
+ * 接受完整 URL、带 .git 后缀的 URL 以及 owner/repo 简写，便于用户直接粘贴浏览器地址。
+ */
+export function parseRepoSlug(input: string): { owner: string; repo: string } | null {
+  const value = input.trim()
+  if (!value) return null
+  const match = value.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
+  if (!match) return null
+  const owner = match[1]
+  const repo = match[2]
+  if (!owner || !repo || owner === 'repo') return null
+  return { owner, repo }
+}
+
+/** 由仓库地址得到 releases/latest 接口地址；地址不合法时返回 null */
+export function latestReleaseUrl(input: string): string | null {
+  const slug = parseRepoSlug(input)
+  return slug ? `${GITHUB_API_BASE}/repos/${slug.owner}/${slug.repo}/releases/latest` : null
+}
+
+/** 由仓库地址得到用户可点击的 Releases 页面地址 */
+export function releasesPageUrl(input: string): string | null {
+  const slug = parseRepoSlug(input)
+  return slug ? `https://github.com/${slug.owner}/${slug.repo}/releases` : null
+}
+
 /** 地址可靠性说明：官方接口固定标注为可信，并如实反映是否走 HTTPS */
 export function sourceReliability(url: string): {
   label: string

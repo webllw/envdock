@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, ProgressBar } from '@renderer/components/ui/ui'
+import { parseRepoSlug, releasesPageUrl } from '@shared/sources'
 import './settings.css'
 
 const kindLabel = { path: 'PATH 项', registry: '注册表', shortcut: '快捷方式' } as const
@@ -26,9 +27,10 @@ export function Settings() {
 
   // 引导完成后 config 由后端回填，同步草稿，避免界面停留在初始占位值
   useEffect(() => {
+    setSourceDraft(config.update.sourceUrl)
     setProxyEnabled(config.proxy.enabled)
     setProxyUrl(config.proxy.url)
-  }, [config.proxy.enabled, config.proxy.url])
+  }, [config.update.sourceUrl, config.proxy.enabled, config.proxy.url])
 
   const proxyDirty = proxyEnabled !== config.proxy.enabled || proxyUrl !== config.proxy.url
 
@@ -149,27 +151,44 @@ export function Settings() {
 
           <div className="setting-row">
             <div className="setting-label">
-              <div className="setting-title">更新源</div>
-              <div className="setting-hint">填写存放 update.json 与升级包的对象存储目录地址</div>
+              <div className="setting-title">更新仓库</div>
+              <div className="setting-hint">从 GitHub Releases 获取最新版本与升级包</div>
             </div>
             <div className="setting-control">
               <input
                 className="path-input mono"
                 value={sourceDraft}
                 onChange={(e) => setSourceDraft(e.target.value)}
-                placeholder="https://oss.example.com/envdock"
-                aria-label="更新源地址"
+                placeholder="https://github.com/owner/repo"
+                aria-label="更新仓库地址"
               />
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={sourceDraft === config.update.sourceUrl}
-                onClick={() => void setUpdSource(sourceDraft.trim(), config.update.autoCheck)}
+                onClick={() => {
+                  if (!parseRepoSlug(sourceDraft)) {
+                    showToast('请填写有效的 GitHub 仓库地址，例如 https://github.com/owner/repo', 'warning')
+                    return
+                  }
+                  void setUpdSource(sourceDraft.trim(), config.update.autoCheck)
+                }}
               >
                 保存
               </Button>
             </div>
           </div>
+          {releasesPageUrl(config.update.sourceUrl) && (
+            <div className="setting-row">
+              <div className="setting-label">
+                <div className="setting-title">发布地址</div>
+                <div className="setting-hint">可在此核对版本与升级包校验值</div>
+              </div>
+              <div className="setting-control">
+                <span className="path-display mono">{releasesPageUrl(config.update.sourceUrl)}</span>
+              </div>
+            </div>
+          )}
 
           <div className="setting-row">
             <div className="setting-label">

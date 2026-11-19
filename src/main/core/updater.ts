@@ -15,7 +15,7 @@ import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { UpdateManifest, UpdateState, VersionState } from '@shared/domain'
 import { downloadBytes, verifyChecksum } from './downloader'
-import { requestFetch } from './net'
+import { fetchLatestRelease } from './github-release'
 import type { Layout } from './paths'
 import type { Store } from './store'
 
@@ -34,6 +34,8 @@ export interface UpdaterOptions {
   emit: (state: UpdateState) => void
   /** 请求应用退出；替换脚本负责随后启动新版本 */
   restart: () => void
+  /** GitHub API 根地址覆盖，仅用于验证环境指向本地服务 */
+  apiBase?: string
 }
 
 /** 比较语义化版本号，a 大于 b 返回 1，相等返回 0，小于返回 -1 */
@@ -52,30 +54,6 @@ export function compareVersions(a: string, b: string): number {
     if (x !== y) return x > y ? 1 : -1
   }
   return 0
-}
-
-/** 校验远程更新清单的必需字段，非法清单直接拒绝，避免把错误地址写进下载流程 */
-function parseManifest(raw: unknown): UpdateManifest | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const source = raw as Record<string, unknown>
-  const required = ['version', 'fileName', 'sha256', 'sizeBytes', 'releasedAt']
-  for (const key of required) {
-    if (typeof source[key] !== 'string' && typeof source[key] !== 'number') return null
-  }
-  if (typeof source.version !== 'string' || source.version.length === 0) return null
-  if (typeof source.fileName !== 'string' || source.fileName.length === 0) return null
-  if (typeof source.sha256 !== 'string' || source.sha256.length !== 64) return null
-  // 拒绝带路径分隔符的文件名，避免清单把下载写到升级目录之外
-  if (source.fileName.includes('/') || source.fileName.includes('\\') || source.fileName.includes('..')) return null
-  return {
-    schemaVersion: typeof source.schemaVersion === 'number' ? source.schemaVersion : 1,
-    version: source.version,
-    releasedAt: typeof source.releasedAt === 'string' ? source.releasedAt : '',
-    fileName: source.fileName,
-    sha256: source.sha256,
-    sizeBytes: typeof source.sizeBytes === 'number' ? source.sizeBytes : 0,
-    notes: typeof source.notes === 'string' ? source.notes : ''
-  }
 }
 
 /**
@@ -234,7 +212,7 @@ export class Updater {
     return this.options.store.getState().config.update.sourceUrl.trim().replace(/\/+$/, '')
   }
 
-  /** 从更新源拉取清单，与内建版本比较；未配置源或已是最新返回 null */
+  /** 从 GitHub Releases 拉取最新发布，与内建版本比较；已是最新返回 null */
   async check(): Promise<UpdateManifest | null> {
     const source = this.sourceUrl()
     if (!source) {
@@ -244,13 +222,21 @@ export class Updater {
     this.publish({ phase: 'checking', message: '正在检查更新', percent: -1 })
 
     try {
-      const response = await requestFetch(`${source}/update.json`, {
-        headers: { 'user-agent': `EnvDock/${this.options.appVersion}` },
-        signal: AbortSignal.timeout(30_000)
+      const manifest = await fetchLatestRelease({
+        sourceUrl: source,
+        appVersion: this.options.appVersion,
+        apiBase: this.options.apiBase
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const manifest = parseManifest(await response.json())
-      if (!manifest) throw new Error('更新清单格式不合法')
+      if (!manifest) {
+        this.available = null
+        this.publish({
+          phase: 'idle',
+          available: null,
+          readyToApply: false,
+          message: `已是最新版本 ${this.options.appVersion}`
+        })
+        return null
+      }
 
       if (compareVersions(manifest.version, this.options.appVersion) <= 0) {
         this.available = null
@@ -284,9 +270,9 @@ export class Updater {
     const manifest = this.available ?? (await this.check())
     if (!manifest) throw new Error('没有可用的新版本')
 
-    const source = this.sourceUrl()
-    const url = `${source}/${manifest.fileName}`
-    const dest = join(this.options.layout.updateDownloadDir, manifest.fileName)
+    const url = manifest.downloadUrl
+    // 文件名来自第三方 release 资产，收敛为 basename 避免路径逃逸
+    const dest = join(this.options.layout.updateDownloadDir, basename(manifest.fileName))
 
     this.publish({ phase: 'downloading', message: '正在下载升级包', percent: 0 })
     await rm(`${dest}.part`, { force: true })

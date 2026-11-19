@@ -114,24 +114,26 @@ export interface HealthCheckItem {
 
 /**
  * 应用更新源配置。
- * 更新包托管在对象存储上，sourceUrl 指向存放 update.json 的目录。
+ * 更新包托管在 GitHub Releases，sourceUrl 指向仓库地址。
  */
 export interface UpdateSourceConfig {
-  /** 存放 update.json 的目录 URL，空字符串表示未配置 */
+  /** GitHub 仓库地址，形如 https://github.com/owner/repo */
   sourceUrl: string
   /** 启动时是否自动检查更新 */
   autoCheck: boolean
 }
 
-/** 更新清单，托管在 sourceUrl 下的 update.json */
+/** 从 GitHub 最新 release 整理出的更新清单 */
 export interface UpdateManifest {
   schemaVersion: number
   /** 新版本号，语义化版本字符串 */
   version: string
   /** 发布日期 ISO 8601 */
   releasedAt: string
-  /** 升级包文件名，相对 sourceUrl */
+  /** 升级包文件名，用于缓存命名 */
   fileName: string
+  /** 升级包下载地址，来自 release asset 的绝对 URL */
+  downloadUrl: string
   /** 升级包 SHA-256 十六进制串 */
   sha256: string
   /** 升级包字节数，用于下载进度展示 */

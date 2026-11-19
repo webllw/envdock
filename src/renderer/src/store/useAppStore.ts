@@ -11,6 +11,7 @@ import type {
   VersionInfo
 } from '@shared/domain'
 import type { ProxyTestResult } from '@shared/ipc'
+import { DEFAULT_UPDATE_REPO } from '@shared/sources'
 import { api } from '@renderer/data/host'
 import { emptyToolSkeletons } from '@shared/tools'
 
@@ -115,7 +116,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tools: emptyToolSkeletons(),
   remote: {},
   manifest: emptyManifest(),
-  config: { mirror: 'official', pathIntegration: true, update: { sourceUrl: '', autoCheck: true }, proxy: { enabled: false, url: '' } },
+  config: { mirror: 'official', pathIntegration: true, update: { sourceUrl: DEFAULT_UPDATE_REPO, autoCheck: true }, proxy: { enabled: false, url: '' } },
   health: [],
   wizard: emptyWizard,
   update: {

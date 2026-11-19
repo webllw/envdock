@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { rm } from 'node:fs/promises'
 import { IPC_CHANNELS, type ActivationRequest, type InstallRequest, type RelocateRequest } from '@shared/ipc'
 import type { ToolId } from '@shared/domain'
+import { parseRepoSlug } from '@shared/sources'
 import { Engine } from './core/engine'
 import { normalizeTargetRoot } from './core/paths'
 
@@ -83,7 +84,9 @@ export function registerIpc(engine: Engine): void {
     if (typeof req?.sourceUrl !== 'string' || typeof req?.autoCheck !== 'boolean') {
       throw new Error('更新源参数不合法')
     }
-    return engine.setConfig({ update: { sourceUrl: req.sourceUrl.trim(), autoCheck: req.autoCheck } })
+    const sourceUrl = req.sourceUrl.trim()
+    if (!parseRepoSlug(sourceUrl)) throw new Error('请填写有效的 GitHub 仓库地址，例如 https://github.com/owner/repo')
+    return engine.setConfig({ update: { sourceUrl, autoCheck: req.autoCheck } })
   })
 
   ipcMain.handle(IPC_CHANNELS.setConfig, async (_event, req: Partial<import('@shared/domain').AppConfig>) =>

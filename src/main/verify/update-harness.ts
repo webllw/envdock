@@ -5,7 +5,7 @@ import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
 import { Updater, compareVersions, buildReplaceScript } from '@main/core/updater'
 
-export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string) {
+export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, apiBase: string) {
   const layout = createLayout(root)
   const store = new Store(layout, '0.1.0')
   await store.init()
@@ -56,11 +56,13 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     store,
     appVersion: '0.1.0',
     emit: (state) => events.push(state.phase),
-    restart: () => undefined
+    restart: () => undefined,
+    apiBase
   })
 
   const manifest = await updater.check()
-  const checkOk = manifest?.version === '0.2.0'
+  const checkOk = manifest?.version === '0.2.0' &&
+    manifest.downloadUrl.includes(packageFileName)
   const prepared = await updater.prepare()
   const prepareOk = prepared.readyToApply && prepared.phase === 'available'
   const stagedExe = join(layout.updateStagingDir, appName())

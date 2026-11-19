@@ -49,7 +49,7 @@ const state = {
   config: {
     mirror: 'official',
     pathIntegration: false,
-    update: { sourceUrl: '', autoCheck: true },
+    update: { sourceUrl: 'https://github.com/webllw/envdock', autoCheck: true },
     proxy: { enabled: false, url: '' }
   },
   updatedAt: now

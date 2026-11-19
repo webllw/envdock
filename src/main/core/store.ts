@@ -10,6 +10,7 @@
 import { mkdir, readFile, rename, writeFile, stat, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AppConfig, AppStateData, Manifest, VersionState } from '@shared/domain'
+import { DEFAULT_UPDATE_REPO, parseRepoSlug } from '@shared/sources'
 import type { Layout } from './paths'
 
 const STATE_SCHEMA_VERSION = 2
@@ -50,7 +51,7 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
 }
 
 export function defaultUpdateConfig() {
-  return { sourceUrl: '', autoCheck: true }
+  return { sourceUrl: DEFAULT_UPDATE_REPO, autoCheck: true }
 }
 
 export function defaultProxyConfig() {
@@ -95,6 +96,9 @@ export function migrateState(raw: unknown, now = new Date().toISOString()): AppS
   }
 
   const mirror = str(config.mirror, 'official')
+  // 旧配置可能存着对象存储地址，无法解析为 GitHub 仓库时回退到默认仓库
+  const storedRepo = str(update.sourceUrl, '')
+  const sourceUrl = parseRepoSlug(storedRepo) ? storedRepo : DEFAULT_UPDATE_REPO
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
     activeVersions,
@@ -104,7 +108,7 @@ export function migrateState(raw: unknown, now = new Date().toISOString()): AppS
         : 'official',
       pathIntegration: bool(config.pathIntegration, false),
       update: {
-        sourceUrl: str(update.sourceUrl, ''),
+        sourceUrl,
         autoCheck: bool(update.autoCheck, true)
       },
       proxy: {
