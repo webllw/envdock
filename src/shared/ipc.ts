@@ -38,7 +38,10 @@ export const IPC_CHANNELS = {
   getUpdateState: 'envdock:get-update-state',
   setUpdSource: 'envdock:set-update-source',
   checkProxy: 'envdock:check-proxy',
-  updateProgress: 'envdock:update-progress'
+  updateProgress: 'envdock:update-progress',
+  windowHide: 'envdock:window-hide',
+  windowQuit: 'envdock:window-quit',
+  refreshTray: 'envdock:refresh-tray'
 } as const
 
 /** 安装操作的请求参数 */
@@ -103,6 +106,12 @@ export interface EnvdockApi {
   setUpdSource(req: SetUpdateSourceRequest): Promise<AppStateData>
   /** 用给定代理实测官方列表接口的连通性；enabled 为 false 时测直连 */
   checkProxy(url: string, enabled: boolean): Promise<ProxyTestResult>
+  /** 隐藏窗口到托盘，应用继续运行 */
+  windowHide(): Promise<void>
+  /** 从托盘菜单退出应用 */
+  windowQuit(): Promise<void>
+  /** 请求主进程重建托盘菜单，激活版本变化后调用 */
+  refreshTray(): Promise<void>
   /** 订阅安装进度，返回取消订阅函数；仅 install 期间有事件 */
   onProgress(listener: (event: ProgressEvent) => void): () => void
   /** 订阅升级进度，返回取消订阅函数 */

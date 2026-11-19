@@ -33,6 +33,15 @@ export default function App() {
     }
   }, [initialize, loadUpdateState, checkUpdate])
 
+  // 从托盘恢复时刷新工具状态：托盘菜单可能已切换全局版本，界面需同步
+  useEffect(() => {
+    const onFocus = () => {
+      if (useAppStore.getState().ready) void useAppStore.getState().refreshTools()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])

@@ -15,6 +15,13 @@ import { normalizeTargetRoot } from './core/paths'
 
 const TOOL_IDS: ToolId[] = ['java', 'php', 'python', 'go', 'node']
 
+/** 窗口生命周期动作，由主进程注入，IPC 层不直接持有 BrowserWindow */
+export interface WindowActions {
+  hide: () => void
+  quit: () => void
+  refreshTray: () => void
+}
+
 function assertToolId(value: unknown): ToolId {
   if (typeof value !== 'string' || !TOOL_IDS.includes(value as ToolId)) {
     throw new Error(`无效的工具标识：${String(value)}`)
@@ -31,8 +38,12 @@ function assertString(value: unknown, label: string): string {
  * 注册全部 IPC handler。
  * 进度事件通过 webContents 主动推送，不放在 invoke 返回值里。
  */
-export function registerIpc(engine: Engine): void {
+export function registerIpc(engine: Engine, windows: WindowActions): void {
   ipcMain.handle(IPC_CHANNELS.bootstrap, async () => engine.bootstrap())
+
+  ipcMain.handle(IPC_CHANNELS.windowHide, async () => windows.hide())
+  ipcMain.handle(IPC_CHANNELS.windowQuit, async () => windows.quit())
+  ipcMain.handle(IPC_CHANNELS.refreshTray, async () => windows.refreshTray())
 
   ipcMain.handle(IPC_CHANNELS.listVersions, async (_event, toolId: unknown) =>
     engine.listVersions(assertToolId(toolId))
@@ -50,23 +61,27 @@ export function registerIpc(engine: Engine): void {
       percent: 100,
       message: '安装完成'
     })
+    windows.refreshTray()
   })
 
   ipcMain.handle(IPC_CHANNELS.activate, async (_event, req: ActivationRequest) => {
     assertToolId(req.toolId)
     assertString(req.versionId, 'versionId')
     await engine.activate(req.toolId, req.versionId)
+    windows.refreshTray()
   })
 
   ipcMain.handle(IPC_CHANNELS.deactivate, async (_event, req: { toolId: ToolId }) => {
     assertToolId(req.toolId)
     await engine.deactivate(req.toolId)
+    windows.refreshTray()
   })
 
   ipcMain.handle(IPC_CHANNELS.uninstallVersion, async (_event, req: ActivationRequest) => {
     assertToolId(req.toolId)
     assertString(req.versionId, 'versionId')
     await engine.uninstallVersion(req.toolId, req.versionId)
+    windows.refreshTray()
   })
 
   ipcMain.handle(IPC_CHANNELS.recheckHealth, async () => engine.healthCheck())

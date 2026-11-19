@@ -51,6 +51,9 @@ export const api = {
     requireHost().setUpdSource({ sourceUrl, autoCheck }),
   checkProxy: (url: string, enabled: boolean): Promise<import('@shared/ipc').ProxyTestResult> =>
     requireHost().checkProxy(url, enabled),
+  windowHide: () => requireHost().windowHide(),
+  windowQuit: () => requireHost().windowQuit(),
+  refreshTray: () => requireHost().refreshTray(),
   onProgress: (listener: (event: import('@shared/domain').ProgressEvent) => void) =>
     host?.onProgress(listener) ?? (() => undefined),
   onUpdateProgress: (listener: (event: UpdateState) => void) =>

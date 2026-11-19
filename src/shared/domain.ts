@@ -104,6 +104,14 @@ export interface ToolSummary {
   remoteCount: number
 }
 
+/** 本地已装版本的精简快照，供系统托盘菜单展示，不触发任何网络请求 */
+export interface LocalToolVersions {
+  id: ToolId
+  displayName: string
+  installed: string[]
+  active: string | null
+}
+
 /** 环境体检的单项结果 */
 export interface HealthCheckItem {
   id: string

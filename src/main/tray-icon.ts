@@ -1,0 +1,2 @@
+/** 系统托盘图标，32x32 PNG；由 scripts/gen-tray-icon.mjs 生成，勿手工改动 */
+export const TRAY_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAaElEQVR4nO3XOw4AEBBFUTuwcVuwVjoNecUwv3gS9T2JKUwp4NTexouLGmpREUY7DhFW8SPCOr4h/gZ4xRciDUByCFADuM8AAbfvTkD+GSDg5TwQ4P8fcP+SERBiMQmxmlkhYFwLgxoT+EETKhKLgaUAAAAASUVORK5CYII='

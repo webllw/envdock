@@ -10,6 +10,7 @@ import type {
   AppStateData,
   BootstrapPayload,
   HealthCheckItem,
+  LocalToolVersions,
   Manifest,
   ProgressEvent,
   ToolId,
@@ -205,6 +206,22 @@ export class Engine {
   private async detectTool(toolId: ToolId) {
     const provider = await this.requireProvider(toolId)
     return provider.detectInstalled(this.layout.root)
+  }
+
+  /**
+   * 本地已装版本快照，供系统托盘菜单使用。
+   * 只扫描磁盘，不请求任何官方接口，避免托盘每次弹出都触发网络。
+   */
+  async localVersions(): Promise<LocalToolVersions[]> {
+    const state = this.store.getState()
+    return Promise.all(
+      allToolMetadata(state.config).map(async (meta) => ({
+        id: meta.id,
+        displayName: meta.displayName,
+        installed: (await this.detectTool(meta.id)).map((item) => item.versionId),
+        active: state.activeVersions[meta.id] ?? null
+      }))
+    )
   }
 
   /** 根据当前全局激活版本重建脚本与垫片 */

@@ -6,10 +6,13 @@ import {
   HardDrive,
   ChevronDown,
   Sun,
-  Moon
+  Moon,
+  Minus,
+  X
 } from 'lucide-react'
 import { useAppStore, type PageKey } from '@renderer/store/useAppStore'
 import { StatusDot } from '@renderer/components/ui/ui'
+import { api } from '@renderer/data/host'
 import './app-shell.css'
 
 const navItems: { key: PageKey; label: string; icon: typeof LayoutDashboard }[] = [
@@ -28,25 +31,56 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { page, theme, toggleTheme, setPage, manifest, update, backendError } = useAppStore()
   const meta = pageMeta[page]
 
+  const handleHide = () => {
+    if (api.hasHost) void api.windowHide()
+  }
+  const handleQuit = () => {
+    if (api.hasHost) void api.windowQuit()
+  }
+
   return (
     <div className="app-shell">
+      <div className="titlebar">
+        <div className="titlebar-brand">
+          <div className="brand-mark">E</div>
+          <span className="brand-name">EnvDock</span>
+          <span className="brand-version">v{update.currentVersion || '—'}</span>
+        </div>
+        <div className="titlebar-drag" />
+        <div className="titlebar-actions">
+          <button
+            type="button"
+            className="titlebar-btn"
+            onClick={toggleTheme}
+            title={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
+            aria-label={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
+          >
+            {theme === 'light' ? <Moon size={14} strokeWidth={1.8} /> : <Sun size={14} strokeWidth={1.8} />}
+          </button>
+          <span className="titlebar-divider" />
+          <button
+            type="button"
+            className="titlebar-btn"
+            onClick={handleHide}
+            title="最小化到托盘"
+            aria-label="最小化到托盘"
+          >
+            <Minus size={15} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            className="titlebar-btn titlebar-close"
+            onClick={handleQuit}
+            title="退出 EnvDock"
+            aria-label="退出 EnvDock"
+          >
+            <X size={14} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
+
       <div className="body-row">
         <nav className="sidebar">
-          <div className="sidebar-brand">
-            <div className="brand-mark">E</div>
-            <span className="brand-name">EnvDock</span>
-            <span className="brand-version">0.1.0</span>
-            <button
-              type="button"
-              className="theme-toggle"
-              onClick={toggleTheme}
-              title={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
-              aria-label={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
-            >
-              {theme === 'light' ? <Moon size={15} strokeWidth={1.8} /> : <Sun size={15} strokeWidth={1.8} />}
-            </button>
-          </div>
-
           <div className="nav-group">
             {navItems.map(({ key, label, icon: Icon }) => (
               <button
