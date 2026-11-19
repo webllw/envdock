@@ -1,9 +1,9 @@
 /** 升级逻辑验证入口，不参与应用构建 */
 import { join } from 'node:path'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
-import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher } from '@main/core/updater'
+import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, APP_EXE_NAME } from '@main/core/updater'
 
 export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, webBase: string) {
   const layout = createLayout(root)
@@ -101,6 +101,23 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const rawManifest = JSON.parse(await readFile(fakeManifestPath, 'utf8'))
   const manifestRootOk = rawManifest.installRoot === root
 
+  // 9. 清理上一版本：嵌套目录（模拟 app.old/resources/app.asar）须删净，且回滚标记复位
+  const backup = layout.appBackupDir
+  await mkdir(join(backup, 'resources'), { recursive: true })
+  await writeFile(join(backup, 'resources', 'app.asar'), 'fake-asar')
+  await writeFile(join(backup, APP_EXE_NAME), 'fake-exe')
+  let discardEmittedCanRollback: boolean | undefined
+  const discarding = new Updater({
+    layout,
+    store: newStore,
+    appVersion: '0.2.0',
+    emit: (state) => { discardEmittedCanRollback = state.canRollback },
+    restart: () => undefined
+  })
+  await discarding.discardOld()
+  const discardOk = await stat(backup).then(() => false, () => true) &&
+    discardEmittedCanRollback === false
+
   return {
     migrationKeepsConfig,
     migrationFillsUpdate,
@@ -119,6 +136,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     confirmOk,
     pendingCleared,
     manifestRootOk,
+    discardOk,
     phases: events
   }
 }

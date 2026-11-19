@@ -103,7 +103,8 @@ const checks = [
   ['挂起版本持久化', result.pendingPersisted],
   ['启动确认写入标记', result.confirmOk],
   ['确认后清空挂起', result.pendingCleared],
-  ['manifest 根路径回填', result.manifestRootOk]
+  ['manifest 根路径回填', result.manifestRootOk],
+  ['清理上一版本嵌套目录', result.discardOk]
 ]
 
 let failed = 0

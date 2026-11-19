@@ -52,6 +52,46 @@ export function buildSilentLauncher(scriptPath: string): string {
   ].join('\r\n')
 }
 
+/**
+ * 健壮删除目录树。
+ *
+ * Windows 上刚升级完的 app.old 常被安全软件或残留进程短暂占用，fs.rm 递归
+ * 删除到深处时会因单个文件删不掉而在 rmdir 阶段抛 ENOTEMPTY。分三层处理：
+ * 先用 maxRetries 做指数退避；仍失败则改名再删——部分占用是按路径锁定的，
+ * 改名后锁会失效；最后确实删不掉时返回残留路径，由调用方如实告知用户。
+ *
+ * directory 改名后原路径立即消失，因此回滚入口可以安全关闭；残留物带时间戳
+ * 落在同级目录，不占用 app.old 这个名字，便于识别与手动清除。
+ */
+export async function removeDirectoryRobust(dir: string): Promise<{ removed: boolean; residue?: string }> {
+  const remove = () => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+  try {
+    await remove()
+    return { removed: true }
+  } catch {
+    // 首轮重试耗尽仍失败，退避一秒后完整再试一轮
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  try {
+    await remove()
+    return { removed: true }
+  } catch {
+    // 占用按路径锁定时改名即可解除；改名失败说明目录被独占，交由调用方提示用户
+  }
+  const residue = `${dir}.discard-${Date.now()}`
+  try {
+    await rename(dir, residue)
+  } catch {
+    return { removed: false }
+  }
+  try {
+    await rm(residue, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+    return { removed: true }
+  } catch {
+    return { removed: false, residue }
+  }
+}
+
 /** 比较语义化版本号，a 大于 b 返回 1，相等返回 0，小于返回 -1 */
 export function compareVersions(a: string, b: string): number {
   const parse = (value: string): number[] =>
@@ -426,7 +466,19 @@ export class Updater {
 
   /** 删除保留的上一版本目录，释放磁盘空间 */
   async discardOld(): Promise<void> {
-    await rm(this.options.layout.appBackupDir, { recursive: true, force: true })
+    const dir = this.options.layout.appBackupDir
+    if (!existsSync(dir)) {
+      this.publish({ canRollback: false })
+      return
+    }
+    const result = await removeDirectoryRobust(dir)
+    if (!result.removed) {
+      // 不向界面抛出 ENOTEMPTY 之类的原始系统调用错误，给出可操作的处理方式
+      const hint = result.residue
+        ? `文件仍被占用，已移至 ${result.residue}，重启后可手动删除`
+        : '目录被占用，请关闭 EnvDock 后手动删除 app.old 文件夹'
+      throw new Error(hint)
+    }
     this.publish({ canRollback: false, message: '已清理上一版本' })
   }
 
