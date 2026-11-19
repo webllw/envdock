@@ -52,8 +52,11 @@ export const api = {
   checkProxy: (url: string, enabled: boolean): Promise<import('@shared/ipc').ProxyTestResult> =>
     requireHost().checkProxy(url, enabled),
   windowHide: () => requireHost().windowHide(),
+  windowMinimize: () => requireHost().windowMinimize(),
   windowQuit: () => requireHost().windowQuit(),
+  windowClose: () => requireHost().windowClose(),
   refreshTray: () => requireHost().refreshTray(),
+  onCloseRequest: (listener: () => void) => host?.onCloseRequest(listener) ?? (() => undefined),
   onProgress: (listener: (event: import('@shared/domain').ProgressEvent) => void) =>
     host?.onProgress(listener) ?? (() => undefined),
   onUpdateProgress: (listener: (event: UpdateState) => void) =>

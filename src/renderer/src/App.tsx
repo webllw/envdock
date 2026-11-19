@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import { InstallWizard } from '@renderer/components/wizard/InstallWizard'
+import { ClosePrompt } from '@renderer/components/dialog/ClosePrompt'
 import { Toast } from '@renderer/components/ui/ui'
 import { Dashboard } from '@renderer/pages/Dashboard'
 import { Runtimes } from '@renderer/pages/Runtimes'
@@ -66,6 +67,7 @@ export default function App() {
         </div>
       )}
       <InstallWizard />
+      <ClosePrompt />
       {toast && <Toast message={toast.message} tone={toast.tone} onClose={clearToast} />}
     </AppShell>
   )

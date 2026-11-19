@@ -13,7 +13,7 @@ import type { AppConfig, AppStateData, Manifest, VersionState } from '@shared/do
 import { DEFAULT_UPDATE_REPO, parseRepoSlug } from '@shared/sources'
 import type { Layout } from './paths'
 
-const STATE_SCHEMA_VERSION = 2
+const STATE_SCHEMA_VERSION = 3
 const MANIFEST_SCHEMA_VERSION = 1
 const VERSION_SCHEMA_VERSION = 1
 
@@ -63,7 +63,8 @@ export function defaultConfig(): AppConfig {
     mirror: 'official',
     pathIntegration: false,
     update: defaultUpdateConfig(),
-    proxy: defaultProxyConfig()
+    proxy: defaultProxyConfig(),
+    closeBehavior: 'ask'
   }
 }
 
@@ -114,7 +115,10 @@ export function migrateState(raw: unknown, now = new Date().toISOString()): AppS
       proxy: {
         enabled: bool(proxy.enabled, false),
         url: str(proxy.url, '')
-      }
+      },
+      closeBehavior: config.closeBehavior === 'tray' || config.closeBehavior === 'quit' || config.closeBehavior === 'ask'
+        ? config.closeBehavior
+        : 'ask'
     },
     updatedAt: str(source.updatedAt, now)
   }

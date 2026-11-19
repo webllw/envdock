@@ -94,6 +94,7 @@ const checks = [
   ['旧配置迁移不丢失', result.migrationKeepsConfig],
   ['迁移补齐 update 字段', result.migrationFillsUpdate],
   ['迁移补齐 proxy 字段', result.migrationFillsProxy],
+  ['迁移补齐 closeBehavior 字段', result.migrationFillsCloseBehavior],
   ['版本状态迁移保留挂起', result.versionMigrationKeepsPending],
   ['语义版本比较', result.compareOk],
   ['升级替换脚本内容正确', result.scriptUpgradeOk],

@@ -20,10 +20,11 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const migrationKeepsConfig = migrated?.config.mirror === 'tsinghua' &&
     migrated?.config.pathIntegration === true &&
     migrated?.activeVersions.java === 'temurin-17'
-  const migrationFillsUpdate = migrated?.schemaVersion === 2 &&
-    migrated?.config.update.autoCheck === true
+  const migrationFillsUpdate = migrated?.config.update.autoCheck === true &&
+    typeof migrated?.config.update.sourceUrl === 'string'
   const migrationFillsProxy = migrated?.config.proxy.enabled === false &&
     migrated?.config.proxy.url === ''
+  const migrationFillsCloseBehavior = migrated?.config.closeBehavior === 'ask'
 
   // 2. 版本状态迁移：挂起版本被保留
   const versionMigrated = migrateVersionState({
@@ -99,6 +100,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     migrationKeepsConfig,
     migrationFillsUpdate,
     migrationFillsProxy,
+    migrationFillsCloseBehavior,
     versionMigrationKeepsPending,
     compareOk,
     scriptUpgradeOk,

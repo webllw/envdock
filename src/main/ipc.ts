@@ -18,7 +18,9 @@ const TOOL_IDS: ToolId[] = ['java', 'php', 'python', 'go', 'node']
 /** 窗口生命周期动作，由主进程注入，IPC 层不直接持有 BrowserWindow */
 export interface WindowActions {
   hide: () => void
+  minimize: () => void
   quit: () => void
+  requestClose: () => void
   refreshTray: () => void
 }
 
@@ -42,7 +44,9 @@ export function registerIpc(engine: Engine, windows: WindowActions): void {
   ipcMain.handle(IPC_CHANNELS.bootstrap, async () => engine.bootstrap())
 
   ipcMain.handle(IPC_CHANNELS.windowHide, async () => windows.hide())
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, async () => windows.minimize())
   ipcMain.handle(IPC_CHANNELS.windowQuit, async () => windows.quit())
+  ipcMain.handle(IPC_CHANNELS.windowClose, async () => windows.requestClose())
   ipcMain.handle(IPC_CHANNELS.refreshTray, async () => windows.refreshTray())
 
   ipcMain.handle(IPC_CHANNELS.listVersions, async (_event, toolId: unknown) =>

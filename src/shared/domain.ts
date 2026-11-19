@@ -197,6 +197,12 @@ export interface ProxyConfig {
   url: string
 }
 
+/**
+ * 点击窗口关闭按钮时的行为。
+ * ask 表示每次弹窗询问；tray 与 quit 是用户记住的选择，后续直接执行。
+ */
+export type CloseBehavior = 'ask' | 'tray' | 'quit'
+
 /** 用户可配置项 */
 export interface AppConfig {
   /** 下载镜像，official 表示直连官方源 */
@@ -207,6 +213,8 @@ export interface AppConfig {
   update: UpdateSourceConfig
   /** 出网代理；关闭时所有请求直连官方源 */
   proxy: ProxyConfig
+  /** 关闭按钮行为；记住后不再询问 */
+  closeBehavior: CloseBehavior
 }
 
 /** 持久化状态，位于环境根目录的 state.json */

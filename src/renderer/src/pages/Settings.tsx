@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe } from 'lucide-react'
+import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, ProgressBar } from '@renderer/components/ui/ui'
 import { parseRepoSlug, releasesPageUrl } from '@shared/sources'
@@ -104,8 +104,42 @@ export function Settings() {
     void uninstallAll()
   }
 
+  const closeBehaviorLabels = { ask: '每次询问', tray: '最小化到托盘', quit: '直接退出' } as const
+
   return (
     <div className="settings">
+      <section className="settings-section">
+        <div className="settings-section-head">
+          <AppWindow size={16} className="section-icon" />
+          <div>
+            <h2>窗口行为</h2>
+            <p>设置点击关闭按钮时执行的操作</p>
+          </div>
+        </div>
+        <Card className="settings-card">
+          <div className="setting-row">
+            <div className="setting-label">
+              <div className="setting-title">关闭按钮</div>
+              <div className="setting-hint">最小化按钮始终将窗口收起到任务栏</div>
+            </div>
+            <div className="setting-control">
+              <div className="choice-group" role="group" aria-label="关闭按钮行为">
+                {(['ask', 'tray', 'quit'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`choice-btn ${config.closeBehavior === value ? 'choice-active' : ''}`}
+                    onClick={() => void setConfig({ closeBehavior: value })}
+                  >
+                    {closeBehaviorLabels[value]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      </section>
+
       <section className="settings-section">
         <div className="settings-section-head">
           <ArrowUpCircle size={16} className="section-icon" />

@@ -41,6 +41,9 @@ export const IPC_CHANNELS = {
   updateProgress: 'envdock:update-progress',
   windowHide: 'envdock:window-hide',
   windowQuit: 'envdock:window-quit',
+  windowMinimize: 'envdock:window-minimize',
+  windowClose: 'envdock:window-close',
+  closeRequest: 'envdock:close-request',
   refreshTray: 'envdock:refresh-tray'
 } as const
 
@@ -108,12 +111,18 @@ export interface EnvdockApi {
   checkProxy(url: string, enabled: boolean): Promise<ProxyTestResult>
   /** 隐藏窗口到托盘，应用继续运行 */
   windowHide(): Promise<void>
-  /** 从托盘菜单退出应用 */
+  /** 最小化窗口到任务栏，应用继续运行 */
+  windowMinimize(): Promise<void>
+  /** 从托盘菜单退出应用，不经过关闭询问 */
   windowQuit(): Promise<void>
+  /** 用户点击关闭按钮，由主进程按记住的行为决定隐藏、退出或弹窗询问 */
+  windowClose(): Promise<void>
   /** 请求主进程重建托盘菜单，激活版本变化后调用 */
   refreshTray(): Promise<void>
   /** 订阅安装进度，返回取消订阅函数；仅 install 期间有事件 */
   onProgress(listener: (event: ProgressEvent) => void): () => void
   /** 订阅升级进度，返回取消订阅函数 */
   onUpdateProgress(listener: (event: UpdateState) => void): () => void
+  /** 订阅关闭询问；用户点关闭且未记住选择时触发，返回取消订阅函数 */
+  onCloseRequest(listener: () => void): () => void
 }

@@ -116,7 +116,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tools: emptyToolSkeletons(),
   remote: {},
   manifest: emptyManifest(),
-  config: { mirror: 'official', pathIntegration: true, update: { sourceUrl: DEFAULT_UPDATE_REPO, autoCheck: true }, proxy: { enabled: false, url: '' } },
+  config: { mirror: 'official', pathIntegration: true, update: { sourceUrl: DEFAULT_UPDATE_REPO, autoCheck: true }, proxy: { enabled: false, url: '' }, closeBehavior: 'ask' },
   health: [],
   wizard: emptyWizard,
   update: {

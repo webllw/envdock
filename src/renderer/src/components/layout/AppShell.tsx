@@ -31,11 +31,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { page, theme, toggleTheme, setPage, manifest, update, backendError } = useAppStore()
   const meta = pageMeta[page]
 
-  const handleHide = () => {
-    if (api.hasHost) void api.windowHide()
+  const handleMinimize = () => {
+    if (api.hasHost) void api.windowMinimize()
   }
-  const handleQuit = () => {
-    if (api.hasHost) void api.windowQuit()
+  const handleClose = () => {
+    if (api.hasHost) void api.windowClose()
   }
 
   return (
@@ -61,18 +61,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="titlebar-btn"
-            onClick={handleHide}
-            title="最小化到托盘"
-            aria-label="最小化到托盘"
+            onClick={handleMinimize}
+            title="最小化"
+            aria-label="最小化"
           >
             <Minus size={15} strokeWidth={1.8} />
           </button>
           <button
             type="button"
             className="titlebar-btn titlebar-close"
-            onClick={handleQuit}
-            title="退出 EnvDock"
-            aria-label="退出 EnvDock"
+            onClick={handleClose}
+            title="关闭"
+            aria-label="关闭"
           >
             <X size={14} strokeWidth={1.8} />
           </button>

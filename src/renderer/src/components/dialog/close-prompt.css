@@ -1,0 +1,129 @@
+.close-modal {
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  animation: modal-in 0.18s ease;
+}
+
+.close-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 22px 6px;
+}
+
+.close-kicker {
+  font-size: 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.close-modal-head h2 {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.close-modal-x {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+.close-modal-x:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.close-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 22px 8px;
+}
+
+.close-option {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.close-option:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.close-option-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.close-option-quit .close-option-icon {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+.close-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.close-option-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.close-option-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.close-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 22px 4px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.close-remember input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.close-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 22px 20px;
+}

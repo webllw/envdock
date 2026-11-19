@@ -59,8 +59,16 @@ const api: EnvdockApi = {
   checkProxy: (url, enabled) => ipcRenderer.invoke(IPC_CHANNELS.checkProxy, url, enabled) as Promise<import('@shared/ipc').ProxyTestResult>,
 
   windowHide: () => ipcRenderer.invoke(IPC_CHANNELS.windowHide) as Promise<void>,
+  windowMinimize: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize) as Promise<void>,
   windowQuit: () => ipcRenderer.invoke(IPC_CHANNELS.windowQuit) as Promise<void>,
+  windowClose: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose) as Promise<void>,
   refreshTray: () => ipcRenderer.invoke(IPC_CHANNELS.refreshTray) as Promise<void>,
+
+  onCloseRequest: (listener) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC_CHANNELS.closeRequest, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.closeRequest, handler)
+  },
 
   onProgress: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: ProgressEvent): void => listener(payload)

@@ -44,13 +44,14 @@ for (const dir of ['runtimes', join('cache', 'downloads'), 'scripts', join('curr
 }
 
 const state = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   activeVersions: {},
   config: {
     mirror: 'official',
     pathIntegration: false,
     update: { sourceUrl: 'https://github.com/webllw/envdock', autoCheck: true },
-    proxy: { enabled: false, url: '' }
+    proxy: { enabled: false, url: '' },
+    closeBehavior: 'ask'
   },
   updatedAt: now
 }

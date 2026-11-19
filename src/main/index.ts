@@ -11,8 +11,33 @@ import type { UpdateState } from '@shared/domain'
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? 'http://localhost:5173'
 
 let tray: Electron.Tray | null = null
+let engine: Engine | null = null
+let mainWindow: BrowserWindow | null = null
 /** 区分用户主动退出与窗口关闭；只有前者才真正结束进程 */
 let quitting = false
+
+/**
+ * 关闭窗口的统一决策入口，标题栏 X 与 Alt+F4 都汇入这里。
+ * event 来自系统 close 事件，需要 preventDefault 才能拦下退出；
+ * 由 IPC 主动触发时没有 event，窗口本身不会因此关闭。
+ */
+function handleClose(event?: Electron.Event): void {
+  if (quitting) return
+  event?.preventDefault()
+
+  const behavior = engine?.getState().config.closeBehavior ?? 'ask'
+  if (behavior === 'tray') {
+    mainWindow?.hide()
+    return
+  }
+  if (behavior === 'quit') {
+    quitApp()
+    return
+  }
+
+  // 未记住选择：交给渲染层弹出询问，用户确认后再执行对应动作
+  mainWindow?.webContents.send(IPC_CHANNELS.closeRequest)
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -34,6 +59,7 @@ function createWindow(): BrowserWindow {
       sandbox: false
     }
   })
+  mainWindow = win
 
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     void win.loadURL(DEV_SERVER_URL)
@@ -44,12 +70,8 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
-  // 关闭按钮与 Alt+F4 都走隐藏，应用常驻托盘；退出只能通过托盘菜单
-  win.on('close', (event) => {
-    if (quitting) return
-    event.preventDefault()
-    win.hide()
-  })
+  // Alt+F4 与系统级关闭走同一套决策，避免绕过询问直接退出
+  win.on('close', (event) => handleClose(event))
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -60,14 +82,18 @@ function createWindow(): BrowserWindow {
 }
 
 function showWindow(): void {
-  const win = BrowserWindow.getAllWindows()[0]
-  if (!win) {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) {
     createWindow()
     return
   }
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+}
+
+function minimizeWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
 }
 
 function quitApp(): void {
@@ -104,12 +130,14 @@ app.setPath('userData', join(resolveInstallRoot(), '.electron-data'))
 
 void app.whenReady().then(async () => {
   try {
-    const engine = await bootstrapEngine()
-    const win = createWindow()
+    engine = await bootstrapEngine()
+    createWindow()
 
     const windowActions: WindowActions = {
-      hide: () => win.hide(),
+      hide: () => mainWindow?.hide(),
+      minimize: minimizeWindow,
       quit: quitApp,
+      requestClose: () => handleClose(),
       refreshTray: () => refreshTray(tray)
     }
     registerIpc(engine, windowActions)
@@ -122,7 +150,7 @@ void app.whenReady().then(async () => {
   }
 })
 
-// 窗口关闭不再结束进程，仅托盘菜单退出触发窗口销毁
+// 窗口关闭不再结束进程，仅托盘菜单退出或记住"直接退出"时触发
 app.on('window-all-closed', () => {
   if (quitting) app.quit()
 })
