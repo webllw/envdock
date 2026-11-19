@@ -4,9 +4,11 @@ Windows 上集中管理多版本开发环境的桌面工具。Java、PHP、Pytho
 
 版本列表和安装包只从各语言的官方接口获取，不使用第三方镜像。
 
-## 本地运行
+## 环境要求
 
-需要 Windows x64 和 Node.js 22 及以上版本。
+开发需要 Windows x64、Node.js 22 及以上版本。打包产物是绿色目录，运行时不需要额外安装 Node.js 或其他依赖。
+
+## 本地运行
 
 ```bash
 npm install
@@ -25,31 +27,150 @@ start.bat
 .\start.bat
 ```
 
+开发态的环境根目录默认在项目内的 `.envdock-data`。指向另一个已存在的目录时设置 `ENVDOCK_ROOT`（必须是绝对路径）。
+
+```bat
+# cmd
+set ENVDOCK_ROOT=D:\envdock-dev
+npm run dev
+```
+
+```powershell
+# PowerShell
+$env:ENVDOCK_ROOT = "D:\envdock-dev"
+npm run dev
+```
+
+## 项目结构
+
+```
+src/
+  main/        主进程：引擎、Provider、存储、更新器、网络层
+    core/      环境布局、状态持久化、激活垫片、下载、GitHub 更新
+    providers/ 各语言的版本解析、下载与激活实现
+    verify/    验证脚本使用的引擎入口
+  preload/     IPC 桥接
+  renderer/    React 界面
+  shared/      领域类型、IPC 契约、官方源与仓库地址定义
+scripts/       打包组装与验证脚本
+out/           构建产物（生成，不入库）
+release/       打包产物（生成，不入库）
+```
+
+Provider 是可插拔的。接入新工具时实现 `src/shared/domain.ts` 中的 `ToolProvider`，在 `src/main/providers/registry.ts` 注册，在 `src/shared/tools.ts` 补充展示元数据；如果工具需要展示官方地址，再在 `src/shared/sources.ts` 的 `OFFICIAL_SOURCES` 增加一项。引擎与界面不需要改动。
+
+## 开发
+
+```bash
+npm run typecheck
+npm run build
+npm run verify:engine
+npm run verify:update
+```
+
+`verify:engine` 覆盖状态读写、解压、版本元数据、垫片与激活脚本生成、目录统计。`verify:update` 在本地起一个 HTTP 服务模拟 GitHub Releases API，覆盖版本比较、下载、校验、解压、挂起状态与启动确认。两个脚本都不启动 Electron，不改动系统 PATH。
+
+出网请求统一走 `src/main/core/net.ts` 的 `requestFetch`，它按设置里的代理配置注入 dispatcher。新增网络请求时使用它而不是直接调用 `fetch`，否则代理设置对该请求无效。
+
 ## 打包
 
 ```bash
 npm run package
 ```
 
-产物在 `release/EnvDock`。这是完整的绿色目录：`app/` 是应用本体，其余是运行时与状态数据。升级时用新版本的 `app/` 覆盖旧目录的 `app/` 即可，`runtimes/`、`state.json`、`manifest.json` 等数据保持不变。
+命令依次执行 `electron-vite build`、`electron-builder --dir` 和 `scripts/assemble-portable.mjs`。产物在 `release/EnvDock`，是完整的绿色目录：
+
+```
+release/EnvDock/
+  app/               应用本体（exe 与 asar）
+  runtimes/          各工具的已安装版本
+  cache/downloads/   下载缓存
+  current/bin/       全局激活版本的可执行文件垫片
+  scripts/           会话激活脚本
+  updates/           自升级暂存
+  state.json         激活版本与配置
+  manifest.json      系统变更记录
+  version.json       当前应用版本
+```
+
+`manifest.json` 的 `installRoot` 在首次启动时按实际位置回填。把整个目录复制到任意磁盘即可使用，升级时只替换 `app/`，其余数据保持不变。
+
+国内网络下载 Electron 二进制较慢时，可设置 `ELECTRON_MIRROR` 后再打包。
+
+## 发布新版本
+
+### 更新版本号
+
+修改 `package.json` 的 `version` 字段，以及 `package-lock.json` 顶层和 `packages[""].version` 两处。应用内建版本取自 `package.json`，`version.json` 在首次启动时写入同一值。
+
+### 提交并打标签
+
+```bash
+git add -A
+git commit -m "发布 1.0.1"
+git tag -a v1.0.1 -m "EnvDock 1.0.1"
+```
+
+标签名使用 `v` 加版本号，与 `package.json` 对应。GitHub Release 依据标签创建，应用比较版本时会去掉 `v` 前缀。
+
+### 推送到 GitHub
+
+首次推送前确认远端：
+
+```bash
+git remote add origin https://github.com/webllw/envdock.git
+git branch -M main
+```
+
+远端为空时：
+
+```bash
+git push -u origin main
+git push origin v1.0.0
+```
+
+远端已有初始化提交（例如创建仓库时生成的 README）且与本地历史无关时，先合并再推送：
+
+```bash
+git fetch origin
+git merge origin/main --allow-unrelated-histories
+git push -u origin main
+git push origin v1.0.0
+```
+
+后续版本正常推送分支和标签：
+
+```bash
+git push
+git push origin v1.0.1
+```
+
+提交身份通过 `git config user.name` 与 `git config user.email` 查看和修改，推送前确认其符合公开仓库的要求。
+
+### 制作升级包
+
+升级包只包含应用本体，不包含运行时与状态数据。把 `release/win-unpacked` 的内容打成 zip，文件名带上版本并含 `app`，例如 `EnvDock-1.0.1-app.zip`。应用解压后将其整体放到 `app/`；如果包内多包了一层 `app/` 目录，解压时会自动剥离。
+
+```powershell
+# PowerShell
+Compress-Archive -Path release\win-unpacked\* -DestinationPath EnvDock-1.0.1-app.zip
+```
+
+### 创建 Release
+
+在 GitHub 仓库的 Releases 页面选择对应标签，上传上一步生成的 zip 后发布。也可以用命令行：
+
+```bash
+gh release create v1.0.1 EnvDock-1.0.1-app.zip --title "EnvDock 1.0.1" --notes "本次更新说明"
+```
+
+GitHub 会为上传的资产自动计算 SHA-256 并在 API 中返回 `digest`，应用读取该值校验升级包。资产没有 digest 时，应用会尝试读取同名的 `.sha256` 附件；两者都缺失则拒绝升级。
+
+应用设置页的「更新仓库」默认指向 `webllw/envdock`，检查更新时请求该仓库的 `releases/latest`。发布后客户端即可发现新版本。
 
 ## 使用
 
-首次启动需要选定安装目录。目录结构：
-
-```
-runtimes/          各工具的已安装版本
-cache/downloads/   下载缓存
-current/bin/       全局激活版本的可执行文件垫片
-scripts/           会话激活脚本
-app/               应用本体
-state.json         激活版本与配置
-manifest.json      系统变更记录
-version.json       当前应用版本
-updates/           自升级暂存
-```
-
-运行时页用于安装版本、设为全局、取消全局和卸载。同一工具可以同时存在多个版本，全局版本只有一个。
+把绿色目录复制到目标磁盘即可运行。首次启动选定安装目录，目录结构如上。运行时页用于安装版本、设为全局、取消全局和卸载。同一工具可以同时存在多个版本，全局版本只有一个。
 
 设置页包含五部分：
 
@@ -70,30 +191,6 @@ call <安装目录>\scripts\activate.bat
 # PowerShell
 . <安装目录>\scripts\activate.ps1
 ```
-
-## 项目结构
-
-```
-src/
-  main/        主进程：引擎、Provider、存储、更新器、网络层
-  preload/     IPC 桥接
-  renderer/    React 界面
-  shared/      领域类型、IPC 契约、官方源定义
-scripts/       打包组装与验证脚本
-```
-
-Provider 是可插拔的。接入新工具时实现 `src/shared/domain.ts` 中的 `ToolProvider`，在 `src/main/providers/registry.ts` 注册，并在 `src/shared/tools.ts` 补充展示元数据。
-
-## 开发
-
-```bash
-npm run typecheck
-npm run build
-npm run verify:engine
-npm run verify:update
-```
-
-开发态的环境根目录默认在项目内的 `.envdock-data`，可通过 `ENVDOCK_ROOT` 环境变量指向另一个已存在的目录。
 
 ## 限制
 
