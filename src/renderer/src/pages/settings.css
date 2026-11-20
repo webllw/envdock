@@ -48,6 +48,36 @@
 
 .setting-row:last-child { border-bottom: none; }
 
+/* 清除残留进行中：行底一条不确定进度扫描条，明确反馈操作在执行 */
+.setting-row-busy { position: relative; }
+
+.setting-row-busy::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+
+.setting-row-busy::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: 40%;
+  background: var(--accent);
+  animation: setting-busy-scan 1s ease-in-out infinite;
+}
+
+@keyframes setting-busy-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
 .setting-label {
   min-width: 0;
 }

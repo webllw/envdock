@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, X, PackageOpen } from 'lucide-react'
 import type { VersionChannel } from '@renderer/types/domain'
 import './ui.css'
 
@@ -102,7 +102,7 @@ export function Toast({ message, tone, onClose }: ToastProps) {
 export function EmptyState({ title, hint }: { title: string; hint: string }) {
   return (
     <div className="empty-state">
-      <div className="empty-mark" />
+      <div className="empty-mark"><PackageOpen size={22} strokeWidth={1.5} /></div>
       <div className="empty-title">{title}</div>
       <div className="empty-hint">{hint}</div>
     </div>

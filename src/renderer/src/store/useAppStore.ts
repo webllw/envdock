@@ -283,8 +283,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     try {
       await api.install(toolId, versionId)
-      set((state) => ({ wizard: { ...state.wizard, stage: 'done', progress: 100 } }))
+      // 先把已安装列表刷新到位再进入完成阶段。否则 done 页先渲染，用户关掉
+      // 向导回到列表时新版本还没出现，会误以为安装没生效。
       await get().refreshTools()
+      set((state) => ({ wizard: { ...state.wizard, stage: 'done', progress: 100 } }))
       get().showToast(`${tool?.displayName ?? toolId} ${versionId} 安装完成`, 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : '安装失败'

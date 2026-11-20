@@ -222,11 +222,16 @@
 }
 
 .empty-mark {
-  width: 36px;
-  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  color: var(--accent);
+  margin-bottom: 6px;
 }
 
 .empty-title { color: var(--text-secondary); font-size: 13px; }

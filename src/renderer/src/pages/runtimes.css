@@ -139,6 +139,34 @@
   100% { transform: translateX(350%); }
 }
 
+/* 设为全局 / 取消全局进行中：accent 色扫描条，与删除的红色区分 */
+.version-row-activating {
+  border-color: var(--accent-border);
+  cursor: wait;
+}
+
+.version-row-activating::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+
+.version-row-activating::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 40%;
+  background: var(--accent);
+  animation: uninstall-scan 1s ease-in-out infinite;
+}
+
 /* 卸载退场：折叠行高与外边距并淡出 */
 .version-row-removing {
   opacity: 0;

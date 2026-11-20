@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow, Trash2 } from 'lucide-react'
+import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow, Trash2, Loader2 } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, ProgressBar } from '@renderer/components/ui/ui'
 import { parseRepoSlug, releasesPageUrl } from '@shared/sources'
@@ -199,14 +199,16 @@ export function Settings() {
             </div>
           )}
 
-          <div className="setting-row">
+          <div className={`setting-row ${clearingResidue ? 'setting-row-busy' : ''}`}>
             <div className="setting-label">
               <div className="setting-title">升级残留</div>
               <div className="setting-hint">清除历史版本归档、升级包缓存与暂存文件，不影响当前运行版本</div>
             </div>
             <div className="setting-control">
               <Button variant="ghost" size="sm" onClick={() => void runClearResidue()} disabled={clearingResidue || busy}>
-                <Trash2 size={13} className={clearingResidue ? 'spin' : ''} /> {clearingResidue ? '清理中' : '清除残留'}
+                {clearingResidue
+                  ? <><Loader2 size={13} className="spin" /> 清理中</>
+                  : <><Trash2 size={13} /> 清除残留</>}
               </Button>
             </div>
           </div>

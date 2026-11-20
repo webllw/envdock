@@ -34,6 +34,17 @@ export function Runtimes() {
     }
   }
 
+  const handleSetActive = async (toolId: string, versionId: string) => {
+    const key = `${toolId}:${versionId}:activate`
+    if (busyKey) return
+    setBusyKey(key)
+    try {
+      await setActiveVersion(toolId as ToolId, versionId)
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
   const handleDeactivate = async (toolId: string) => {
     const key = `${toolId}:deactivate`
     if (busyKey) return
@@ -107,12 +118,15 @@ export function Runtimes() {
           {displayInstalled.map((version) => {
             const isGlobal = selected.activeVersionId === version.versionId
             const uninstallKey = `${selected.id}:${version.versionId}:uninstall`
+            const activateKey = `${selected.id}:${version.versionId}:activate`
+            const deactivateKey = `${selected.id}:deactivate`
             const isRemoving = removingKey === uninstallKey
             const isUninstalling = busyKey === uninstallKey
+            const isActivating = busyKey === activateKey || (isGlobal && busyKey === deactivateKey)
             return (
               <Card
                 key={version.versionId}
-                className={`version-row ${isRemoving ? 'version-row-removing' : ''} ${isUninstalling && !isRemoving ? 'version-row-uninstalling' : ''}`}
+                className={`version-row ${isRemoving ? 'version-row-removing' : ''} ${isUninstalling && !isRemoving ? 'version-row-uninstalling' : ''} ${isActivating && !isRemoving ? 'version-row-activating' : ''}`}
               >
                 <div className="version-main">
                   <StatusDot tone={isGlobal ? 'ok' : 'idle'} />
@@ -133,16 +147,20 @@ export function Runtimes() {
                       title="取消该工具的全局激活"
                       onClick={() => void handleDeactivate(selected.id)}
                     >
-                      <Check size={13} /> 取消全局
+                      {busyKey === deactivateKey
+                        ? <><Loader2 size={13} className="spin" /> 取消中</>
+                        : <><Check size={13} /> 取消全局</>}
                     </Button>
                   ) : (
                     <Button
                       variant="ghost"
                       size="sm"
                       disabled={Boolean(busyKey)}
-                      onClick={() => void setActiveVersion(selected.id, version.versionId)}
+                      onClick={() => void handleSetActive(selected.id, version.versionId)}
                     >
-                      设为全局
+                      {busyKey === activateKey
+                        ? <><Loader2 size={13} className="spin" /> 设置中</>
+                        : '设为全局'}
                     </Button>
                   )}
                   <Button
