@@ -110,6 +110,7 @@ const checks = [
   ['挂起版本持久化', result.pendingPersisted],
   ['启动确认写入标记', result.confirmOk],
   ['确认后清空挂起', result.pendingCleared],
+  ['升级确认后自动清理旧版本与升级包', result.autoCleanOk],
   ['manifest 根路径回填', result.manifestRootOk],
   ['历史版本降序列表与可启动判定', result.historyListOk],
   ['回退到指定版本且损坏版本被拒', result.rollbackToVersionOk],

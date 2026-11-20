@@ -33,10 +33,6 @@ export const IPC_CHANNELS = {
   progress: 'envdock:progress',
   checkUpdate: 'envdock:check-update',
   applyUpdate: 'envdock:apply-update',
-  rollbackUpdate: 'envdock:rollback-update',
-  rollbackToVersion: 'envdock:rollback-to-version',
-  discardOldVersion: 'envdock:discard-old-version',
-  discardVersion: 'envdock:discard-version',
   getUpdateState: 'envdock:get-update-state',
   setUpdSource: 'envdock:set-update-source',
   checkProxy: 'envdock:check-proxy',
@@ -103,14 +99,6 @@ export interface EnvdockApi {
   checkUpdate(): Promise<UpdateManifest | null>
   /** 下载并准备升级包，返回后由界面提示用户确认重启 */
   applyUpdate(): Promise<UpdateState>
-  /** 回滚到上一个版本，会重启应用 */
-  rollbackUpdate(): Promise<void>
-  /** 回退到指定历史版本，会重启应用 */
-  rollbackToVersion(versionId: string): Promise<void>
-  /** 删除保留的上一版本目录 */
-  discardOldVersion(): Promise<void>
-  /** 删除指定的历史版本归档 */
-  discardVersion(versionId: string): Promise<void>
   getUpdateState(): Promise<UpdateState>
   setUpdSource(req: SetUpdateSourceRequest): Promise<AppStateData>
   /** 用给定代理实测官方列表接口的连通性；enabled 为 false 时测直连 */

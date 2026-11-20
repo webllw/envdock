@@ -1,23 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow, Trash2, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, ProgressBar } from '@renderer/components/ui/ui'
-import { ConfirmDialog } from '@renderer/components/dialog/ConfirmDialog'
 import { parseRepoSlug, releasesPageUrl } from '@shared/sources'
-import type { AppHistoryEntry } from '@shared/domain'
 import './settings.css'
 
 const kindLabel = { path: 'PATH 项', registry: '注册表', shortcut: '快捷方式' } as const
-
-type PendingAction =
-  | { kind: 'rollback'; entry: AppHistoryEntry }
-  | { kind: 'discard'; entry: AppHistoryEntry }
-  | null
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
 
 /** 迁移目标必须是 Windows 绝对路径，相对路径会被解析到不可预期的位置 */
 function isAbsolutePath(value: string): boolean {
@@ -27,7 +15,7 @@ function isAbsolutePath(value: string): boolean {
 export function Settings() {
   const {
     manifest, config, update, migrate, chooseDirectory, setPathIntegration, uninstallAll, showToast,
-    checkUpdate, applyUpdate, rollbackToVersion, discardVersion, setUpdSource, setConfig, checkProxy
+    checkUpdate, applyUpdate, setUpdSource, setConfig, checkProxy
   } = useAppStore()
   const [migrating, setMigrating] = useState(false)
   const [target, setTarget] = useState('')
@@ -36,13 +24,6 @@ export function Settings() {
   const [proxyEnabled, setProxyEnabled] = useState(config.proxy.enabled)
   const [proxyUrl, setProxyUrl] = useState(config.proxy.url)
   const [testingProxy, setTestingProxy] = useState(false)
-  const [pending, setPending] = useState<PendingAction>(null)
-  const [acting, setActing] = useState(false)
-  /** 删除中的历史版本：确认后立刻固定该行并显示进度，成功后播退场动画 */
-  const [removingVersion, setRemovingVersion] = useState<string | null>(null)
-  const [removedVersion, setRemovedVersion] = useState<string | null>(null)
-  /** 弹窗关闭后保留被删行快照，供退场动画期间继续占位 */
-  const lastRemovedRef = useRef<AppHistoryEntry | null>(null)
 
   // 引导完成后 config 由后端回填，同步草稿，避免界面停留在初始占位值
   useEffect(() => {
@@ -94,63 +75,6 @@ export function Settings() {
 
   const busy = update.phase === 'downloading' || update.phase === 'verifying' ||
     update.phase === 'extracting' || update.phase === 'restarting'
-
-  const confirmAction = async () => {
-    if (!pending || acting) return
-    const action = pending
-    setActing(true)
-    try {
-      if (action.kind === 'rollback') {
-        await rollbackToVersion(action.entry.version)
-      } else {
-        // 确认后立刻关闭弹窗，把该行固定在列表原位并显示删除中，
-        // 与运行时版本页的卸载流程保持一致
-        lastRemovedRef.current = action.entry
-        setPending(null)
-        setRemovingVersion(action.entry.version)
-        const ok = await discardVersion(action.entry.version)
-        if (ok) {
-          setRemovedVersion(action.entry.version)
-          await new Promise((resolve) => setTimeout(resolve, 320))
-        }
-      }
-      setPending(null)
-    } finally {
-      setActing(false)
-      setRemovingVersion(null)
-      setRemovedVersion(null)
-    }
-  }
-
-  // 删除期间真实列表可能已被刷新，用快照把该行按原位留在列表直到动画结束
-  const displayHistory = useMemo(() => {
-    const list = [...update.history]
-    if (!removingVersion) return list
-    const entry = pending?.kind === 'discard' ? pending.entry : null
-    const snapshot = entry ?? lastRemovedRef.current
-    if (snapshot && snapshot.version === removingVersion &&
-        !list.some((item) => item.version === removingVersion)) {
-      list.push(snapshot)
-      list.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
-    }
-    return list
-  }, [update.history, removingVersion, pending])
-
-  const confirmCopy = pending
-    ? pending.kind === 'rollback'
-      ? {
-          title: `回退到 v${pending.entry.version}？`,
-          description: '当前版本会先归档保留，随后应用重启并运行所选版本。历史列表可随时再次切换。',
-          confirmLabel: '回退并重启',
-          tone: 'primary' as const
-        }
-      : {
-          title: `删除历史版本 v${pending.entry.version}？`,
-          description: '删除后该版本将无法再回退，此操作不可撤销。当前正在运行的版本不受影响。',
-          confirmLabel: '删除版本',
-          tone: 'danger' as const
-        }
-    : null
 
   const runMigration = async () => {
     const value = target.trim()
@@ -221,7 +145,7 @@ export function Settings() {
           <ArrowUpCircle size={16} className="section-icon" />
           <div>
             <h2>应用更新</h2>
-            <p>更新只替换 app/ 目录，运行时、版本与配置保持不变</p>
+            <p>更新只替换 app/ 目录，运行时、版本与配置保持不变；新版本确认可用后自动清理旧版本</p>
           </div>
         </div>
         <Card className="settings-card">
@@ -324,60 +248,6 @@ export function Settings() {
             </div>
           </div>
 
-        </Card>
-        <Card className="settings-card history-card">
-          <div className="history-head">
-            <span>版本</span><span>归档时间</span><span>占用</span><span>操作</span>
-          </div>
-          {displayHistory.length === 0 ? (
-            <div className="history-empty">暂无历史版本。每次升级后，升级前的版本会自动归档；下载过的升级包也会显示在此。</div>
-          ) : displayHistory.map((entry) => {
-            const isRemoving = removingVersion === entry.version
-            const isRemoved = removedVersion === entry.version
-            const isCurrent = entry.version === update.currentVersion
-            const sourceLabel = isCurrent ? '当前版本'
-              : entry.source === 'both' ? '归档 + 安装包'
-                : entry.source === 'package' ? '安装包' : '归档'
-            return (
-              <div
-                className={`history-row ${isRemoving && !isRemoved ? 'history-row-removing' : ''} ${isRemoved ? 'history-row-removed' : ''}`}
-                key={entry.version}
-              >
-                <span className="mono history-version">
-                  v{entry.version}
-                  <span className="history-source">{sourceLabel}</span>
-                </span>
-                <span className="history-meta">{entry.archivedAt.slice(0, 16).replace('T', ' ')}</span>
-                <span className="history-meta">{formatSize(entry.sizeBytes)}</span>
-                <span className="history-actions">
-                  {isRemoving ? (
-                    <span className="history-busy"><Loader2 size={13} className="spin" /> 删除中</span>
-                  ) : (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isCurrent || !entry.launchable || busy || acting}
-                        title={isCurrent ? '当前正在运行的版本' : entry.launchable ? '回退到此版本并重启' : '该版本缺少主程序，无法回退'}
-                        onClick={() => setPending({ kind: 'rollback', entry })}
-                      >
-                        <RotateCcw size={13} /> 回退
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={isCurrent || busy || acting}
-                        onClick={() => setPending({ kind: 'discard', entry })}
-                        title={isCurrent ? '当前版本不能删除' : '删除此历史版本'}
-                      >
-                        <Trash2 size={13} /> 删除
-                      </Button>
-                    </>
-                  )}
-                </span>
-              </div>
-            )
-          })}
         </Card>
       </section>
 
@@ -556,17 +426,6 @@ export function Settings() {
           </div>
         </Card>
       </section>
-
-      <ConfirmDialog
-        open={pending !== null}
-        title={confirmCopy?.title ?? ''}
-        description={confirmCopy?.description ?? ''}
-        confirmLabel={confirmCopy?.confirmLabel ?? '确认'}
-        tone={confirmCopy?.tone}
-        busy={acting}
-        onCancel={() => !acting && setPending(null)}
-        onConfirm={() => void confirmAction()}
-      />
     </div>
   )
 }

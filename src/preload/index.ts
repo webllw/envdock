@@ -51,10 +51,6 @@ const api: EnvdockApi = {
 
   checkUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.checkUpdate) as Promise<UpdateManifest | null>,
   applyUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.applyUpdate) as Promise<UpdateState>,
-  rollbackUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.rollbackUpdate) as Promise<void>,
-  rollbackToVersion: (versionId) => ipcRenderer.invoke(IPC_CHANNELS.rollbackToVersion, versionId) as Promise<void>,
-  discardOldVersion: () => ipcRenderer.invoke(IPC_CHANNELS.discardOldVersion) as Promise<void>,
-  discardVersion: (versionId) => ipcRenderer.invoke(IPC_CHANNELS.discardVersion, versionId) as Promise<void>,
   getUpdateState: () => ipcRenderer.invoke(IPC_CHANNELS.getUpdateState) as Promise<UpdateState>,
   setUpdSource: (req) => ipcRenderer.invoke(IPC_CHANNELS.setUpdSource, req) as Promise<import('@shared/domain').AppStateData>,
 

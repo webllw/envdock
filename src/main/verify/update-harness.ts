@@ -144,6 +144,11 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const pendingPersisted = newStore.getVersion().pendingVersion === '0.2.0'
 
   // 7. 确认逻辑：版本一致时写确认文件并清空挂起
+  // confirm 前造一个旧版本归档，确认成功后应被自动清理（不再提供回退）
+  const cachedZipBytes = await readFile(cachedZip)
+  const supersededDir = join(layout.updateHistoryDir, '0.1.0')
+  await mkdir(join(supersededDir, 'resources'), { recursive: true })
+  await writeFile(join(supersededDir, APP_EXE_NAME), 'old-exe')
   const confirming = new Updater({
     layout,
     store: newStore,
@@ -155,6 +160,12 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   await confirming.confirmOnStartup()
   const confirmOk = await stat(layout.updateConfirmFile).then(() => true, () => false)
   const pendingCleared = newStore.getVersion().pendingVersion === null
+  // 升级确认后旧归档与升级包缓存都被清掉
+  const autoCleanOk = await stat(supersededDir).then(() => false, () => true) &&
+    await stat(cachedZip).then(() => false, () => true)
+  // 后续历史来源断言仍需要升级包缓存，重新写回
+  await mkdir(layout.updateDownloadDir, { recursive: true })
+  await writeFile(cachedZip, cachedZipBytes)
 
   // 8. manifest 根路径回填
   const fakeManifestPath = layout.manifestFile
@@ -299,6 +310,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     pendingPersisted,
     confirmOk,
     pendingCleared,
+    autoCleanOk,
     manifestRootOk,
     historyListOk,
     rollbackToVersionOk,

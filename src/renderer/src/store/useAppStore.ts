@@ -87,10 +87,6 @@ interface AppState {
   uninstallAll: () => Promise<void>
   checkUpdate: (silent?: boolean) => Promise<UpdateManifest | null>
   applyUpdate: () => Promise<void>
-  rollbackUpdate: () => Promise<void>
-  rollbackToVersion: (versionId: string) => Promise<void>
-  discardOldVersion: () => Promise<void>
-  discardVersion: (versionId: string) => Promise<boolean>
   setUpdSource: (sourceUrl: string, autoCheck: boolean) => Promise<void>
   loadUpdateState: () => Promise<void>
   setUpdateState: (state: UpdateState) => void
@@ -376,46 +372,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showToast('升级包已就绪，应用即将重启', 'success')
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '升级失败', 'warning')
-    }
-  },
-
-  rollbackUpdate: async () => {
-    try {
-      await api.rollbackUpdate()
-      get().showToast('正在回滚，应用即将重启', 'info')
-    } catch (error) {
-      get().showToast(error instanceof Error ? error.message : '回滚失败', 'warning')
-    }
-  },
-
-  rollbackToVersion: async (versionId) => {
-    try {
-      await api.rollbackToVersion(versionId)
-      get().showToast(`正在回退到 v${versionId}，应用即将重启`, 'info')
-    } catch (error) {
-      get().showToast(error instanceof Error ? error.message : '回退失败', 'warning')
-    }
-  },
-
-  discardOldVersion: async () => {
-    try {
-      await api.discardOldVersion()
-      await get().loadUpdateState()
-      get().showToast('已清理上一版本', 'success')
-    } catch (error) {
-      get().showToast(error instanceof Error ? error.message : '清理失败', 'warning')
-    }
-  },
-
-  discardVersion: async (versionId) => {
-    try {
-      await api.discardVersion(versionId)
-      await get().loadUpdateState()
-      get().showToast(`历史版本 v${versionId} 已删除`, 'success')
-      return true
-    } catch (error) {
-      get().showToast(error instanceof Error ? error.message : '删除失败', 'warning')
-      return false
     }
   },
 

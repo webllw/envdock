@@ -44,10 +44,6 @@ export const api = {
   openTerminal: () => requireHost().openTerminal(),
   checkUpdate: (): Promise<UpdateManifest | null> => requireHost().checkUpdate(),
   applyUpdate: (): Promise<UpdateState> => requireHost().applyUpdate(),
-  rollbackUpdate: () => requireHost().rollbackUpdate(),
-  rollbackToVersion: (versionId: string) => requireHost().rollbackToVersion(versionId),
-  discardOldVersion: () => requireHost().discardOldVersion(),
-  discardVersion: (versionId: string) => requireHost().discardVersion(versionId),
   getUpdateState: (): Promise<UpdateState> => requireHost().getUpdateState(),
   setUpdSource: (sourceUrl: string, autoCheck: boolean) =>
     requireHost().setUpdSource({ sourceUrl, autoCheck }),

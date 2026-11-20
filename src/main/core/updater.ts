@@ -13,6 +13,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -79,30 +80,37 @@ export function buildSilentLauncher(scriptPath: string): string {
  * 改名后锁会失效；最后确实删不掉时返回残留路径，由调用方如实告知用户。
  */
 export async function removeDirectoryRobust(dir: string): Promise<{ removed: boolean; residue?: string }> {
-  const remove = () => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+  // 快速删除：不做长退避。fs.rm 的 maxRetries 在 Windows 上对 ENOTEMPTY/EBUSY
+  // 会指数级累积等待，最坏可达数分钟，界面会一直停在“删除中”。
   try {
-    await remove()
+    await rm(dir, { recursive: true, force: true, maxRetries: 1, retryDelay: 60 })
     return { removed: true }
   } catch {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    // 转入改名兜底
   }
-  try {
-    await remove()
-    return { removed: true }
-  } catch {
-    // 占用按路径锁定时改名即可解除；改名失败说明目录被独占，交由调用方提示用户
-  }
+  // 占用多是按路径锁定的，改名到新路径通常能立即成功并让原路径腾空。
   const residue = `${dir}.discard-${Date.now()}`
   try {
     await rename(dir, residue)
   } catch {
     return { removed: false }
   }
+  // 残留清理放到后台，不阻塞调用方；下次启动时还会再扫一次 .discard 目录。
+  void rm(residue, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 }).catch(() => undefined)
+  return { removed: true, residue }
+}
+
+/** 清理上次未删净的 .discard 残留目录，避免长期占用磁盘 */
+export async function cleanupDiscardResidue(rootDir: string): Promise<void> {
+  let entries: Dirent[] = []
   try {
-    await rm(residue, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
-    return { removed: true }
+    entries = await readdir(rootDir, { withFileTypes: true })
   } catch {
-    return { removed: false, residue }
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.includes('.discard-')) continue
+    await rm(join(rootDir, entry.name), { recursive: true, force: true, maxRetries: 1, retryDelay: 60 }).catch(() => undefined)
   }
 }
 
@@ -440,7 +448,9 @@ export class Updater {
     let archives: string[] = []
     try {
       const entries = await readdir(archiveDir, { withFileTypes: true })
-      archives = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      // .discard 是删除时改名待清理的残留，不作为历史版本展示
+      archives = entries.filter((entry) => entry.isDirectory() && !entry.name.includes('.discard-'))
+        .map((entry) => entry.name)
     } catch {
       /* 目录尚未建立，按空列表处理 */
     }
@@ -725,8 +735,47 @@ export class Updater {
     return this.state()
   }
 
+  /**
+   * 升级成功后清理被取代的版本：history 下的全部归档、download 下的升级包缓存。
+   * 设计上不再提供回退，旧版本只占磁盘；清理走健壮删除，占用时改名后台删除。
+   * 逐项独立处理，单项失败不影响其余条目，也不影响当前版本运行。
+   */
+  private async cleanupSuperseded(): Promise<void> {
+    const archiveDir = this.options.layout.updateHistoryDir
+    const downloadDir = this.options.layout.updateDownloadDir
+
+    let archives: string[] = []
+    try {
+      archives = (await readdir(archiveDir, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    } catch {
+      /* 目录尚未建立 */
+    }
+    for (const name of archives) {
+      await removeDirectoryRobust(join(archiveDir, name)).catch(() => undefined)
+    }
+
+    let packages: string[] = []
+    try {
+      packages = (await readdir(downloadDir, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && /-app\.zip$/i.test(entry.name)).map((entry) => entry.name)
+    } catch {
+      /* 目录尚未建立 */
+    }
+    for (const name of packages) {
+      await rm(join(downloadDir, name), { force: true }).catch(() => undefined)
+    }
+
+    this.history = []
+    await cleanupDiscardResidue(archiveDir)
+    await cleanupDiscardResidue(downloadDir)
+  }
+
   /** 启动确认。新版本首次启动时调用：版本匹配则写确认文件并清空挂起状态 */
   async confirmOnStartup(): Promise<void> {
+    // 每次启动都清理上次删除遗留的 .discard 目录，避免长期占用磁盘
+    await cleanupDiscardResidue(this.options.layout.updateHistoryDir)
+    await cleanupDiscardResidue(this.options.layout.updateDownloadDir)
     const version = this.options.store.getVersion()
     if (!version.pendingVersion) {
       // 替换脚本失败时会在 updates/error.flag 留下原因；读出来告知用户后清除，
@@ -764,6 +813,9 @@ export class Updater {
     })
     // staging 在升级成功后通常已被脚本移走；即使仍被占用也不能阻塞启动确认
     await removeDirectoryRobust(this.options.layout.updateStagingDir)
+    // 新版本已确认可用，不再保留旧版本：清理归档与升级包缓存。
+    // 清理失败不抛错——旧版本残留只占磁盘，不影响当前版本运行。
+    await this.cleanupSuperseded()
     this.publish({
       phase: 'idle',
       currentVersion: this.options.appVersion,

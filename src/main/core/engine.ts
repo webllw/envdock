@@ -73,22 +73,6 @@ export class Engine {
     return this.updater.apply()
   }
 
-  async rollbackUpdate(): Promise<void> {
-    await this.updater.rollback()
-  }
-
-  async rollbackToVersion(versionId: string): Promise<void> {
-    await this.updater.rollbackTo(versionId)
-  }
-
-  async discardOldVersion(): Promise<void> {
-    await this.updater.discardOld()
-  }
-
-  async discardVersion(versionId: string): Promise<void> {
-    await this.updater.discardVersion(versionId)
-  }
-
   getUpdateState(): UpdateState {
     return this.updater.state()
   }

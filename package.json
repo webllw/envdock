@@ -1,6 +1,6 @@
 {
   "name": "envdock",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "集中式多语言开发环境管理工具",
   "productName": "EnvDock",
   "license": "MIT",
@@ -29,7 +29,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "package": "npm run build && electron-builder --dir --win --config electron-builder.yml && node scripts/assemble-portable.mjs",
+    "package": "node scripts/build-release.mjs",
     "verify:engine": "node scripts/verify-engine.mjs",
     "verify:update": "node scripts/verify-update.mjs"
   },
