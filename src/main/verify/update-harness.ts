@@ -112,6 +112,28 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const afterReuse = (await stat(cachedZip)).mtimeMs
   const cacheReuseOk = reprepared.readyToApply && beforeReuse === afterReuse && markerOk
 
+  // staging 残留嵌套目录时 prepare 必须能清理覆盖，不能因 ENOTEMPTY 中断
+  const staleFile = join(layout.updateStagingDir, 'resources', 'stale.asar')
+  await mkdir(join(layout.updateStagingDir, 'resources'), { recursive: true })
+  await writeFile(staleFile, 'left-over-from-failed-upgrade')
+  const afterStale = await updater.prepare()
+  const staleCleared = await stat(staleFile).then(() => false, () => true)
+  const stagingCleanOk = afterStale.readyToApply && staleCleared && afterStale.phase === 'available'
+
+  // prepare 失败时 phase 必须复位到 error，避免界面 busy 卡在 extracting
+  const errorPhases: string[] = []
+  const failing = new Updater({
+    layout,
+    store,
+    appVersion: '0.1.0',
+    emit: (state) => errorPhases.push(state.phase),
+    restart: () => undefined,
+    webBase: 'http://127.0.0.1:1',
+    launchScript: () => undefined
+  })
+  const prepareRejected = await failing.prepare().then(() => false, () => true)
+  const errorResetOk = prepareRejected && errorPhases.includes('error')
+
   // 6. 写入挂起状态（模拟 apply 的版本写入部分，不真正 spawn 脚本）
   await store.updateVersion((draft) => {
     draft.previousVersion = '0.1.0'
@@ -272,6 +294,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     downloadOk,
     markerOk,
     cacheReuseOk,
+    stagingCleanOk,
+    errorResetOk,
     pendingPersisted,
     confirmOk,
     pendingCleared,

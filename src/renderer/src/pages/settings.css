@@ -159,6 +159,22 @@
 
 .migration-progress .progress-track { flex: 1; }
 
+.update-error-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--error);
+  background: var(--error-soft);
+  border: 1px solid var(--error-border);
+  border-radius: 6px;
+}
+
+.update-error-hint svg { flex-shrink: 0; margin-top: 1px; }
+
 .history-card { padding: 4px 18px 6px; margin-top: 10px; }
 
 .history-head,

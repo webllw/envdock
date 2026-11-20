@@ -349,7 +349,13 @@ export function buildReplaceScript(params: {
  * 一层 app/，统一剥离。路径做穿越校验，完成后校验主程序确实落盘。
  */
 async function extractAppArchive(archive: string, targetDir: string): Promise<void> {
-  await rm(targetDir, { recursive: true, force: true })
+  // 上次升级残留的 staging 常被安全软件或残留句柄锁定，普通 rm 删到 resources
+  // 深处会抛 ENOTEMPTY。健壮删除带退避重试与改名兜底；改名后原路径已腾空，
+  // 只有连改名都失败时才终止，避免把旧文件混进新版本。
+  const cleanup = await removeDirectoryRobust(targetDir)
+  if (!cleanup.removed && !cleanup.residue) {
+    throw new Error(`升级暂存目录被占用，无法清理：${targetDir}`)
+  }
   await mkdir(targetDir, { recursive: true })
   const zip = new AdmZip(archive)
 
@@ -633,52 +639,63 @@ export class Updater {
 
   /** 下载并校验升级包，解压到 staging；不改动当前应用 */
   async prepare(): Promise<UpdateState> {
-    const manifest = this.available ?? (await this.check())
-    if (!manifest) throw new Error('没有可用的新版本')
+    try {
+      const manifest = this.available ?? (await this.check())
+      if (!manifest) throw new Error('没有可用的新版本')
 
-    const url = manifest.downloadUrl
-    // 文件名来自第三方 release 资产，收敛为 basename 避免路径逃逸
-    const dest = join(this.options.layout.updateDownloadDir, basename(manifest.fileName))
+      const url = manifest.downloadUrl
+      // 文件名来自第三方 release 资产，收敛为 basename 避免路径逃逸
+      const dest = join(this.options.layout.updateDownloadDir, basename(manifest.fileName))
 
-    // 已下载并校验通过的包直接复用。上次下载完成但升级未生效时，缓存仍在，
-    // 重试无需再次传输 60MB；损坏或上次中断残留的缓存删除后重新下载。
-    let reusable = false
-    if (existsSync(dest)) {
-      this.publish({ phase: 'verifying', message: '正在校验已下载的升级包', percent: 50 })
-      reusable = await verifyChecksum(dest, manifest.sha256, 'sha256')
-      if (!reusable) await rm(dest, { force: true })
-    }
-
-    if (!reusable) {
-      this.publish({ phase: 'downloading', message: '正在下载升级包', percent: 0 })
-      await rm(`${dest}.part`, { force: true })
-      await downloadBytes(url, `${dest}.part`, (received, total) => {
-        const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : -1
-        this.publish({
-          phase: 'downloading',
-          percent,
-          message: `下载中 ${(received / 1024 / 1024).toFixed(1)} MB`
-        })
-      })
-
-      this.publish({ phase: 'verifying', message: '正在校验升级包', percent: 99 })
-      if (!(await verifyChecksum(`${dest}.part`, manifest.sha256, 'sha256'))) {
-        await rm(`${dest}.part`, { force: true })
-        throw new Error('升级包校验失败，可能下载不完整')
+      // 已下载并校验通过的包直接复用。上次下载完成但升级未生效时，缓存仍在，
+      // 重试无需再次传输 60MB；损坏或上次中断残留的缓存删除后重新下载。
+      let reusable = false
+      if (existsSync(dest)) {
+        this.publish({ phase: 'verifying', message: '正在校验已下载的升级包', percent: 50 })
+        reusable = await verifyChecksum(dest, manifest.sha256, 'sha256')
+        if (!reusable) await rm(dest, { force: true })
       }
-      await rename(`${dest}.part`, dest)
+
+      if (!reusable) {
+        this.publish({ phase: 'downloading', message: '正在下载升级包', percent: 0 })
+        await rm(`${dest}.part`, { force: true })
+        await downloadBytes(url, `${dest}.part`, (received, total) => {
+          const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : -1
+          this.publish({
+            phase: 'downloading',
+            percent,
+            message: `下载中 ${(received / 1024 / 1024).toFixed(1)} MB`
+          })
+        })
+
+        this.publish({ phase: 'verifying', message: '正在校验升级包', percent: 99 })
+        if (!(await verifyChecksum(`${dest}.part`, manifest.sha256, 'sha256'))) {
+          await rm(`${dest}.part`, { force: true })
+          throw new Error('升级包校验失败，可能下载不完整')
+        }
+        await rename(`${dest}.part`, dest)
+      }
+
+      this.publish({ phase: 'extracting', message: '正在准备升级文件', percent: 100 })
+      await extractToStaging(dest, this.options.layout.updateStagingDir, manifest.version)
+
+      this.publish({
+        phase: 'available',
+        readyToApply: true,
+        percent: 100,
+        message: `新版本 ${manifest.version} 已就绪，重启后生效`
+      })
+      return this.state()
+    } catch (error) {
+      // 失败必须复位 phase，否则界面因 busy 卡在 extracting 而永久禁用按钮。
+      // 保留 available 与已下载缓存，重试时可直接复用，不重复传输大包。
+      this.publish({
+        phase: 'error',
+        readyToApply: false,
+        message: error instanceof Error ? error.message : '升级准备失败，请重试'
+      })
+      throw error
     }
-
-    this.publish({ phase: 'extracting', message: '正在准备升级文件', percent: 100 })
-    await extractToStaging(dest, this.options.layout.updateStagingDir, manifest.version)
-
-    this.publish({
-      phase: 'available',
-      readyToApply: true,
-      percent: 100,
-      message: `新版本 ${manifest.version} 已就绪，重启后生效`
-    })
-    return this.state()
   }
 
   /**
@@ -745,7 +762,8 @@ export class Updater {
       draft.pendingVersion = null
       draft.lastMessage = `已升级到 ${this.options.appVersion}`
     })
-    await rm(this.options.layout.updateStagingDir, { recursive: true, force: true })
+    // staging 在升级成功后通常已被脚本移走；即使仍被占用也不能阻塞启动确认
+    await removeDirectoryRobust(this.options.layout.updateStagingDir)
     this.publish({
       phase: 'idle',
       currentVersion: this.options.appVersion,

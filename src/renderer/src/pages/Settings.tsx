@@ -259,6 +259,12 @@ export function Settings() {
             </div>
           )}
 
+          {update.phase === 'error' && (
+            <div className="update-error-hint">
+              <Info size={13} /> {update.message}。可点击「下载并升级」重试，已下载的升级包会直接复用。
+            </div>
+          )}
+
           <div className="setting-row">
             <div className="setting-label">
               <div className="setting-title">更新仓库</div>

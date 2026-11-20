@@ -105,6 +105,8 @@ const checks = [
   ['staging 含应用本体', result.stagedOk],
   ['staging 写入目标版本标记', result.markerOk],
   ['已校验缓存复用不重复下载', result.cacheReuseOk],
+  ['staging 残留嵌套目录时可清理覆盖', result.stagingCleanOk],
+  ['prepare 失败复位到 error 可重试', result.errorResetOk],
   ['挂起版本持久化', result.pendingPersisted],
   ['启动确认写入标记', result.confirmOk],
   ['确认后清空挂起', result.pendingCleared],
