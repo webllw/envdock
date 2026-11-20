@@ -48,7 +48,7 @@
 
 .setting-row:last-child { border-bottom: none; }
 
-/* 清除残留进行中：行底一条不确定进度扫描条，明确反馈操作在执行 */
+/* 扫描条用背景位移实现，保证运动片段始终被行边界裁切 */
 .setting-row-busy { position: relative; }
 
 .setting-row-busy::before {
@@ -58,24 +58,17 @@
   right: 0;
   bottom: 0;
   height: 2px;
-  overflow: hidden;
-  background: var(--accent-soft);
-}
-
-.setting-row-busy::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  width: 40%;
-  background: var(--accent);
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent-soft), var(--accent-soft));
+  background-size: 40% 100%, 100% 100%;
+  background-repeat: no-repeat;
   animation: setting-busy-scan 1s ease-in-out infinite;
 }
 
 @keyframes setting-busy-scan {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  0% { background-position: -40% 0, 0 0; }
+  100% { background-position: 100% 0, 0 0; }
 }
 
 .setting-label {

@@ -148,8 +148,14 @@ export async function runHarness(root: string, archive: string) {
   }]
   await writeCurrentShims(layout, activeWithNode)
   await writeActivationScripts(layout, activeWithNode)
-  const npmShim = await readFile(join(layout.currentBinDir, 'node.cmd'), 'utf8')
-  const npmShimCarriesPrefix = npmShim.includes('npm_config_prefix=') && npmShim.includes('global\\npm')
+  const nodeShim = await readFile(join(layout.currentBinDir, 'node.cmd'), 'utf8')
+  const npmCmdShim = await readFile(join(layout.currentBinDir, 'npm.cmd'), 'utf8')
+  const npxCmdShim = await readFile(join(layout.currentBinDir, 'npx.cmd'), 'utf8')
+  const nodeShimCarriesPrefix = nodeShim.includes('npm_config_prefix=') && nodeShim.includes('global\\npm')
+  // PATH 集成只暴露 current/bin，npm/npx 必须由垫片转发到版本目录里的 .cmd
+  const npmCmdShimTargetsCmd = npmCmdShim.includes('npm.cmd') && !npmCmdShim.includes('npm.exe')
+  const npxCmdShimTargetsCmd = npxCmdShim.includes('npx.cmd') && !npxCmdShim.includes('npx.exe')
+  const npmCmdShimCarriesPrefix = npmCmdShim.includes('npm_config_prefix=') && npmCmdShim.includes('global\\npm')
   const npmScriptCarriesPrefix = (await readFile(join(layout.scriptsDir, 'activate.ps1'), 'utf8'))
     .includes("$env:npm_config_prefix = Join-Path $envdockRoot 'global/npm'")
 
@@ -181,7 +187,10 @@ export async function runHarness(root: string, archive: string) {
     npmTraversalRejected,
     npmNormalized,
     npmPrefixStable,
-    npmShimCarriesPrefix,
+    nodeShimCarriesPrefix,
+    npmCmdShimTargetsCmd,
+    npxCmdShimTargetsCmd,
+    npmCmdShimCarriesPrefix,
     npmScriptCarriesPrefix,
     diskUsage
   }

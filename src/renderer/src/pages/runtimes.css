@@ -112,6 +112,7 @@
   cursor: wait;
 }
 
+/* 扫描条用背景位移实现，保证运动片段始终被行边界裁切 */
 .version-row-uninstalling::before {
   content: '';
   position: absolute;
@@ -119,24 +120,17 @@
   right: 0;
   top: 0;
   height: 2px;
-  overflow: hidden;
-  background: var(--error-soft);
-}
-
-.version-row-uninstalling::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 2px;
-  width: 40%;
-  background: var(--error);
+  background-image:
+    linear-gradient(var(--error), var(--error)),
+    linear-gradient(var(--error-soft), var(--error-soft));
+  background-size: 40% 100%, 100% 100%;
+  background-repeat: no-repeat;
   animation: uninstall-scan 1s ease-in-out infinite;
 }
 
 @keyframes uninstall-scan {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  0% { background-position: -40% 0, 0 0; }
+  100% { background-position: 100% 0, 0 0; }
 }
 
 /* 设为全局 / 取消全局进行中：accent 色扫描条，与删除的红色区分 */
@@ -152,18 +146,11 @@
   right: 0;
   top: 0;
   height: 2px;
-  overflow: hidden;
-  background: var(--accent-soft);
-}
-
-.version-row-activating::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 2px;
-  width: 40%;
-  background: var(--accent);
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent-soft), var(--accent-soft));
+  background-size: 40% 100%, 100% 100%;
+  background-repeat: no-repeat;
   animation: uninstall-scan 1s ease-in-out infinite;
 }
 

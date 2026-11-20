@@ -65,7 +65,10 @@ const checks = [
   ['npm 全局目录拒绝 .. 穿越', result.npmTraversalRejected],
   ['npm 全局目录规范化为相对路径', result.npmNormalized],
   ['npm 全局前缀与缓存不含版本号', result.npmPrefixStable],
-  ['node 垫片携带 npm_config_prefix', result.npmShimCarriesPrefix],
+  ['node 垫片携带 npm_config_prefix', result.nodeShimCarriesPrefix],
+  ['npm 垫片指向 npm.cmd', result.npmCmdShimTargetsCmd],
+  ['npx 垫片指向 npx.cmd', result.npxCmdShimTargetsCmd],
+  ['npm 垫片携带 npm_config_prefix', result.npmCmdShimCarriesPrefix],
   ['激活脚本按根目录展开 npm 前缀', result.npmScriptCarriesPrefix],
   ['目录占用统计为正数', result.diskUsage > 0]
 ]
