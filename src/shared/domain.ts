@@ -164,6 +164,20 @@ export interface VersionState {
   updatedAt: string
 }
 
+/**
+ * 一条应用历史版本归档，位于 updates/history/<version>。
+ * 目录名即版本号，内容为该版本 app 目录的完整副本。
+ */
+export interface AppHistoryEntry {
+  version: string
+  /** 归档时间，取目录创建/修改时间，ISO 8601 */
+  archivedAt: string
+  /** 归档占用字节数 */
+  sizeBytes: number
+  /** 是否含有可执行主程序，可安全回退 */
+  launchable: boolean
+}
+
 /** 升级流程阶段 */
 export type UpdatePhase =
   | 'idle'
@@ -183,8 +197,10 @@ export interface UpdateState {
   available: UpdateManifest | null
   /** 是否已有通过校验、待应用的升级包 */
   readyToApply: boolean
-  /** 是否存在可回滚的旧版本目录 */
+  /** 是否存在可回退的历史版本目录 */
   canRollback: boolean
+  /** 已归档的历史版本，按版本号降序 */
+  history: AppHistoryEntry[]
   /** 阶段说明文字 */
   message: string
   /** 0-100；无法给出比例时为 -1 */

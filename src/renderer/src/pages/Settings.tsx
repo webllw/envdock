@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react'
-import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow } from 'lucide-react'
+import { HardDrive, ShieldCheck, MoveRight, Link2, RotateCcw, Info, RefreshCw, Download, ArrowUpCircle, FolderOpen, Globe, AppWindow, Trash2 } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, ProgressBar } from '@renderer/components/ui/ui'
+import { ConfirmDialog } from '@renderer/components/dialog/ConfirmDialog'
 import { parseRepoSlug, releasesPageUrl } from '@shared/sources'
+import type { AppHistoryEntry } from '@shared/domain'
 import './settings.css'
 
 const kindLabel = { path: 'PATH 项', registry: '注册表', shortcut: '快捷方式' } as const
+
+type PendingAction =
+  | { kind: 'rollback'; entry: AppHistoryEntry }
+  | { kind: 'discard'; entry: AppHistoryEntry }
+  | null
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
 
 /** 迁移目标必须是 Windows 绝对路径，相对路径会被解析到不可预期的位置 */
 function isAbsolutePath(value: string): boolean {
@@ -15,7 +27,7 @@ function isAbsolutePath(value: string): boolean {
 export function Settings() {
   const {
     manifest, config, update, migrate, chooseDirectory, setPathIntegration, uninstallAll, showToast,
-    checkUpdate, applyUpdate, rollbackUpdate, discardOldVersion, setUpdSource, setConfig, checkProxy
+    checkUpdate, applyUpdate, rollbackToVersion, discardVersion, setUpdSource, setConfig, checkProxy
   } = useAppStore()
   const [migrating, setMigrating] = useState(false)
   const [target, setTarget] = useState('')
@@ -24,6 +36,8 @@ export function Settings() {
   const [proxyEnabled, setProxyEnabled] = useState(config.proxy.enabled)
   const [proxyUrl, setProxyUrl] = useState(config.proxy.url)
   const [testingProxy, setTestingProxy] = useState(false)
+  const [pending, setPending] = useState<PendingAction>(null)
+  const [acting, setActing] = useState(false)
 
   // 引导完成后 config 由后端回填，同步草稿，避免界面停留在初始占位值
   useEffect(() => {
@@ -75,6 +89,34 @@ export function Settings() {
 
   const busy = update.phase === 'downloading' || update.phase === 'verifying' ||
     update.phase === 'extracting' || update.phase === 'restarting'
+
+  const confirmAction = async () => {
+    if (!pending || acting) return
+    setActing(true)
+    try {
+      if (pending.kind === 'rollback') await rollbackToVersion(pending.entry.version)
+      else await discardVersion(pending.entry.version)
+      setPending(null)
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const confirmCopy = pending
+    ? pending.kind === 'rollback'
+      ? {
+          title: `回退到 v${pending.entry.version}？`,
+          description: '当前版本会先归档保留，随后应用重启并运行所选版本。历史列表可随时再次切换。',
+          confirmLabel: '回退并重启',
+          tone: 'primary' as const
+        }
+      : {
+          title: `删除历史版本 v${pending.entry.version}？`,
+          description: '删除后该版本将无法再回退，此操作不可撤销。当前正在运行的版本不受影响。',
+          confirmLabel: '删除版本',
+          tone: 'danger' as const
+        }
+    : null
 
   const runMigration = async () => {
     const value = target.trim()
@@ -242,22 +284,40 @@ export function Settings() {
             </div>
           </div>
 
-          {update.canRollback && (
-            <div className="setting-row">
-              <div className="setting-label">
-                <div className="setting-title">保留的上一版本</div>
-                <div className="setting-hint">app.old/ 仍存在，可回滚或清理以释放空间</div>
-              </div>
-              <div className="setting-control">
-                <Button variant="ghost" size="sm" onClick={() => void rollbackUpdate()}>
-                  <RotateCcw size={13} /> 回滚
+        </Card>
+        <Card className="settings-card history-card">
+          <div className="history-head">
+            <span>版本</span><span>归档时间</span><span>占用</span><span>操作</span>
+          </div>
+          {update.history.length === 0 ? (
+            <div className="history-empty">暂无历史版本。每次升级后，升级前的版本会自动归档于此。</div>
+          ) : update.history.map((entry) => (
+            <div className="history-row" key={entry.version}>
+              <span className="mono history-version">v{entry.version}</span>
+              <span className="history-meta">{entry.archivedAt.slice(0, 16).replace('T', ' ')}</span>
+              <span className="history-meta">{formatSize(entry.sizeBytes)}</span>
+              <span className="history-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!entry.launchable || busy || acting}
+                  title={entry.launchable ? '回退到此版本并重启' : '该版本缺少主程序，无法回退'}
+                  onClick={() => setPending({ kind: 'rollback', entry })}
+                >
+                  <RotateCcw size={13} /> 回退
                 </Button>
-                <Button variant="danger" size="sm" onClick={() => void discardOldVersion()}>
-                  清理
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={busy || acting}
+                  onClick={() => setPending({ kind: 'discard', entry })}
+                  title="删除此历史版本"
+                >
+                  <Trash2 size={13} /> 删除
                 </Button>
-              </div>
+              </span>
             </div>
-          )}
+          ))}
         </Card>
       </section>
 
@@ -436,6 +496,17 @@ export function Settings() {
           </div>
         </Card>
       </section>
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={confirmCopy?.title ?? ''}
+        description={confirmCopy?.description ?? ''}
+        confirmLabel={confirmCopy?.confirmLabel ?? '确认'}
+        tone={confirmCopy?.tone}
+        busy={acting}
+        onCancel={() => !acting && setPending(null)}
+        onConfirm={() => void confirmAction()}
+      />
     </div>
   )
 }

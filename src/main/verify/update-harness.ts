@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
-import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, APP_EXE_NAME } from '@main/core/updater'
+import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, isValidVersionDir, APP_EXE_NAME } from '@main/core/updater'
 
 export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, webBase: string) {
   const layout = createLayout(root)
@@ -40,23 +40,31 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareVersions('0.1.0', '0.1.0') === 0 &&
     compareVersions('0.1.0', '0.2.0') === -1
 
-  // 4. 替换脚本内容：升级分支含备份与就位，回滚分支含旧版本恢复
-  const upgradeScript = buildReplaceScript({ root, mode: 'upgrade' })
-  const rollbackScript = buildReplaceScript({ root, mode: 'rollback' })
-  // 替换脚本必须按进程名强制结束残留实例，不能再用 PID + findstr 轮询（会死循环弹窗）
+  // 4. 替换脚本：升级归档当前版本并等待确认；回退到指定版本就位后立即启动
+  const upgradeScript = buildReplaceScript({ root, mode: 'upgrade', fromVersion: '0.1.0' })
+  const switchScript = buildReplaceScript({
+    root, mode: 'switch', fromVersion: '0.1.0', targetVersion: '0.0.9'
+  })
+  // 按进程名强制结束残留实例，不能再用 PID + findstr 轮询（会死循环弹窗）
   const killsByName = upgradeScript.includes(`taskkill /F /IM ${appName()}`) &&
     !upgradeScript.includes('findstr') && !upgradeScript.includes(':wait_exit')
   const silentLauncher = buildSilentLauncher('C:\\tmp\\replace.bat').includes('WScript.Shell') &&
     buildSilentLauncher('C:\\tmp\\replace.bat').includes(', 0, False')
-  // 备份用 ren（目标存在即失败），就位用 move 但必须校验 exe；失败走 :recover，绝不启动空 app
-  const backupByRename = upgradeScript.includes(`ren "${root}\\app" app.old`) &&
-    upgradeScript.includes(':backup') && upgradeScript.includes(':recover')
+  const history = join(root, 'updates', 'history')
+  // 归档：删除同名目标后 move 到 history/<version>，保证原子改名而不嵌套
+  const archiveByMove = upgradeScript.includes(`move "${root}\\app" "${history}\\0.1.0"`) &&
+    upgradeScript.includes(`if exist "${history}\\0.1.0" rmdir /S /Q`) &&
+    upgradeScript.includes(':recover')
   const verifyBeforeLaunch = upgradeScript.includes(`if not exist "${root}\\app\\${appName()}" goto recover`) &&
-    upgradeScript.includes(`if not exist "${root}\\app\\${appName()}" goto fail`)
-  const scriptUpgradeOk = upgradeScript.includes('move') && backupByRename && verifyBeforeLaunch &&
-    upgradeScript.includes(appName()) && upgradeScript.includes(':rollback') && killsByName
-  const scriptRollbackOk = rollbackScript.includes('app.old') && rollbackScript.includes(':launch') &&
-    rollbackScript.includes(`ren "${root}\\app.old" app`) && killsByName
+    upgradeScript.includes(`if not exist "${history}\\0.1.0\\${appName()}" goto recover`)
+  // 升级必须等待确认并带超时回滚；回退脚本就位后直接 :switched，绝不进入确认轮询自杀
+  const scriptUpgradeOk = upgradeScript.includes(':launch') && upgradeScript.includes(':confirm') &&
+    upgradeScript.includes(':timeout') && archiveByMove && verifyBeforeLaunch && killsByName
+  const scriptRollbackOk = switchScript.includes(`move "${history}\\0.0.9" "${root}\\app"`) &&
+    switchScript.includes(':switched') && !switchScript.includes(':confirm') &&
+    !switchScript.includes(':timeout') && switchScript.includes(':recover') && killsByName
+  const versionDirGuard = isValidVersionDir('1.0.6') && isValidVersionDir('2.2.32-LTS') &&
+    !isValidVersionDir('../evil') && !isValidVersionDir('a\\b') && !isValidVersionDir('..')
 
   // 5. 配置更新源并跑真实 HTTP 检查 + 下载 + 校验 + 解压
   await store.updateState((draft) => {
@@ -107,11 +115,67 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const rawManifest = JSON.parse(await readFile(fakeManifestPath, 'utf8'))
   const manifestRootOk = rawManifest.installRoot === root
 
-  // 9. 清理上一版本：嵌套目录（模拟 app.old/resources/app.asar）须删净，且回滚标记复位
-  const backup = layout.appBackupDir
-  await mkdir(join(backup, 'resources'), { recursive: true })
-  await writeFile(join(backup, 'resources', 'app.asar'), 'fake-asar')
-  await writeFile(join(backup, APP_EXE_NAME), 'fake-exe')
+  // 9. 历史归档：造两个版本，验证列表按版本降序、launchable 判定与嵌套目录清理
+  const mkHistory = async (version: string): Promise<string> => {
+    const dir = join(layout.updateHistoryDir, version)
+    await mkdir(join(dir, 'resources'), { recursive: true })
+    await writeFile(join(dir, 'resources', 'app.asar'), 'fake-asar')
+    await writeFile(join(dir, APP_EXE_NAME), 'fake-exe')
+    return dir
+  }
+  const v009 = await mkHistory('0.0.9')
+  const v010 = await mkHistory('0.1.0')
+  const vBroken = join(layout.updateHistoryDir, '0.1.1')
+  await mkdir(vBroken, { recursive: true })
+
+  let lastHistory = newStore.getVersion().currentVersion
+  let historyCanRollback: boolean | undefined
+  const listing = new Updater({
+    layout,
+    store: newStore,
+    appVersion: '0.2.0',
+    emit: (state) => {
+      historyCanRollback = state.canRollback
+      lastHistory = state.history.map((h) => h.version).join(',')
+    },
+    restart: () => undefined
+  })
+  const entries = await listing.loadHistory()
+  const historyListOk = entries.length === 3 &&
+    entries[0].version === '0.1.1' && entries[1].version === '0.1.0' &&
+    entries[2].version === '0.0.9' &&
+    entries.find((e) => e.version === '0.1.1')?.launchable === false &&
+    entries.find((e) => e.version === '0.1.0')?.launchable === true &&
+    entries[1].sizeBytes > 0 && historyCanRollback === true &&
+    lastHistory === '0.1.1,0.1.0,0.0.9'
+
+  // 10. 回退到指定版本：损坏版本被拒，合法版本清空挂起并记录目标版本
+  let rollbackRejected = false
+  try {
+    await listing.rollbackTo('0.1.1')
+  } catch {
+    rollbackRejected = true
+  }
+  let rollbackStarted = false
+  const switcher = new Updater({
+    layout,
+    store: newStore,
+    appVersion: '0.2.0',
+    emit: () => undefined,
+    restart: () => { rollbackStarted = true }
+  })
+  await switcher.rollbackTo('0.1.0')
+  const afterRollback = newStore.getVersion()
+  const rollbackToVersionOk = rollbackRejected && rollbackStarted &&
+    afterRollback.currentVersion === '0.1.0' && afterRollback.pendingVersion === null
+
+  // 11. 删除指定历史版本：嵌套目录删净，标志复位，当前运行版本拒绝删除
+  let currentRejected = false
+  try {
+    await listing.discardVersion('0.2.0')
+  } catch {
+    currentRejected = true
+  }
   let discardEmittedCanRollback: boolean | undefined
   const discarding = new Updater({
     layout,
@@ -120,9 +184,19 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     emit: (state) => { discardEmittedCanRollback = state.canRollback },
     restart: () => undefined
   })
-  await discarding.discardOld()
-  const discardOk = await stat(backup).then(() => false, () => true) &&
-    discardEmittedCanRollback === false
+  await discarding.discardVersion('0.0.9')
+  const discardOk = await stat(v009).then(() => false, () => true) &&
+    await stat(v010).then(() => true, () => false) &&
+    discardEmittedCanRollback === true && currentRejected
+
+  // 12. 旧 app.old 迁移为历史归档，避免升级到新机制后旧版本失联
+  const legacy = layout.appBackupDir
+  await mkdir(join(legacy, 'resources'), { recursive: true })
+  await writeFile(join(legacy, APP_EXE_NAME), 'fake-exe')
+  await newStore.updateVersion((draft) => { draft.previousVersion = '0.0.8' })
+  await discarding.init()
+  const legacyMigrated = await stat(join(layout.updateHistoryDir, '0.0.8', APP_EXE_NAME))
+    .then(() => true, () => false) && await stat(legacy).then(() => false, () => true)
 
   return {
     migrationKeepsConfig,
@@ -133,6 +207,7 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareOk,
     scriptUpgradeOk,
     scriptRollbackOk,
+    versionDirGuard,
     silentLauncher,
     checkOk,
     prepareOk,
@@ -142,7 +217,10 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     confirmOk,
     pendingCleared,
     manifestRootOk,
+    historyListOk,
+    rollbackToVersionOk,
     discardOk,
+    legacyMigrated,
     phases: events
   }
 }

@@ -1,19 +1,22 @@
 /**
- * 应用自身升级引擎。
+ * 应用自身升级与版本历史管理引擎。
  *
  * 职责：检查远程更新清单、下载校验升级包、解压到 staging、写入挂起版本、
- * 生成进程外替换脚本并退出。新版本启动后由 confirmOnStartup 确认升级，
- * 超时未确认时由替换脚本自动回滚。
+ * 生成进程外替换脚本并退出。新版本启动后由 confirmOnStartup 确认升级。
+ *
+ * 版本历史统一放在 updates/history/<version>/，每个目录是一份完整的 app 副本。
+ * 升级时归档当前版本，回退时归档当前版本并就位目标版本，因此历史始终是
+ * 「当前运行版本之外的版本集合」，用户可对任意条目回退或删除。
  *
  * 本模块不直接依赖 electron：重启动作通过构造参数注入，便于在测试环境中
  * 用临时目录验证完整状态机，而不真正启动桌面应用或改动系统 PATH。
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import type { UpdateManifest, UpdateState, VersionState } from '@shared/domain'
+import type { AppHistoryEntry, UpdateManifest, UpdateState, VersionState } from '@shared/domain'
 import { downloadBytes, verifyChecksum } from './downloader'
 import { fetchLatestRelease } from './github-release'
 import type { Layout } from './paths'
@@ -24,6 +27,13 @@ export const APP_EXE_NAME = 'EnvDock.exe'
 
 /** 替换脚本等待新版本写确认文件的轮询次数，每次约 0.5 秒，超时触发回滚 */
 const CONFIRM_WAIT_TICKS = 60
+
+/** 版本目录名只允许普通版本字符，防止归档路径穿越 */
+const VERSION_DIR_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/
+
+export function isValidVersionDir(version: string): boolean {
+  return VERSION_DIR_PATTERN.test(version) && version !== '.' && version !== '..'
+}
 
 export interface UpdaterOptions {
   layout: Layout
@@ -55,13 +65,10 @@ export function buildSilentLauncher(scriptPath: string): string {
 /**
  * 健壮删除目录树。
  *
- * Windows 上刚升级完的 app.old 常被安全软件或残留进程短暂占用，fs.rm 递归
+ * Windows 上刚升级完的归档目录常被安全软件或残留进程短暂占用，fs.rm 递归
  * 删除到深处时会因单个文件删不掉而在 rmdir 阶段抛 ENOTEMPTY。分三层处理：
  * 先用 maxRetries 做指数退避；仍失败则改名再删——部分占用是按路径锁定的，
  * 改名后锁会失效；最后确实删不掉时返回残留路径，由调用方如实告知用户。
- *
- * directory 改名后原路径立即消失，因此回滚入口可以安全关闭；残留物带时间戳
- * 落在同级目录，不占用 app.old 这个名字，便于识别与手动清除。
  */
 export async function removeDirectoryRobust(dir: string): Promise<{ removed: boolean; residue?: string }> {
   const remove = () => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
@@ -69,7 +76,6 @@ export async function removeDirectoryRobust(dir: string): Promise<{ removed: boo
     await remove()
     return { removed: true }
   } catch {
-    // 首轮重试耗尽仍失败，退避一秒后完整再试一轮
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   try {
@@ -110,126 +116,163 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
+/** 递归统计目录字节数，用于历史条目占用展示；读不到的分支按 0 计 */
+async function directorySize(dir: string): Promise<number> {
+  let total = 0
+  const walk = async (current: string): Promise<void> => {
+    let items
+    try {
+      items = await readdir(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const item of items) {
+      const full = join(current, item.name)
+      if (item.isDirectory()) {
+        await walk(full)
+      } else if (item.isFile()) {
+        try {
+          total += (await stat(full)).size
+        } catch {
+          /* 遍历期间文件可能被删除，忽略 */
+        }
+      }
+    }
+  }
+  await walk(dir)
+  return total
+}
+
 /**
  * 生成进程外替换脚本。
  *
- * Windows 无法覆盖正在运行的 exe，脚本必须在主进程退出后执行：
- * 先结束同名残留进程 → 备份 app → 就位新版本 → 启动 → 轮询确认文件 →
- * 超时则回滚。所有路径在生成时展开为绝对路径；脚本是一次性临时文件，
- * 不参与目录迁移，因此可以安全写死。
+ * Windows 无法覆盖正在运行的 exe，脚本必须在主进程退出后执行。两类模式：
+ * - upgrade：归档当前版本 → staging 就位 → 启动 → 等待确认 → 超时从归档恢复。
+ * - switch：归档当前版本 → 指定历史版本就位 → 启动后立即退出。历史版本是
+ *   此前已验证可运行的副本，不再等待确认——旧回滚逻辑正是因为等待一个
+ *   永远不会被写入的确认文件，超时后杀掉刚启动的进程，导致应用不可用。
  *
- * 不再按 PID 轮询等待：PID 退出后会被系统回收复用，findstr 匹配数字会把
- * 复用的无关进程误判为原进程，陷入死循环并反复弹出控制台窗口。改为在
- * Windows 任务管理器可见的层面前强制结束同名进程，再短暂等待文件句柄释放。
- *
- * 目录改名分两步且逐步校验：备份用 ren（同目录原子改名，目标名已存在即失败），
- * 就位用 move 但仅在上一步确认 app 已腾空后执行。move 到已存在的目录名会把
- * 源目录移入其中（app 移进 app.old\app、staging 移进 app\staging），导致旧 exe
- * 被启动、新版本被嵌套。任一步失败都走恢复分支把 app.old 改回 app，
- * 并记录 error.flag，绝不在 app 缺失或版本不对时启动。
+ * 目录跨父目录移动只能用 move，且目标存在时会把源移入其中造成嵌套。因此
+ * 每次 move 前先删除同名目标，确保 move 是原子改名；任一步失败都走 :recover
+ * 把归档移回 app，绝不在 app 缺失或缺少 exe 时结束。
  */
 export function buildReplaceScript(params: {
   root: string
-  mode: 'upgrade' | 'rollback'
+  mode: 'upgrade' | 'switch'
+  fromVersion: string
+  targetVersion?: string
   timeoutTicks?: number
 }): string {
-  const { root, mode } = params
+  const { root, mode, fromVersion } = params
   const ticks = params.timeoutTicks ?? CONFIRM_WAIT_TICKS
   const app = join(root, 'app')
-  const backup = join(root, 'app.old')
   const staging = join(root, 'updates', 'staging')
+  const history = join(root, 'updates', 'history')
+  const from = join(history, fromVersion)
+  const fromExe = join(from, APP_EXE_NAME)
+  const target = mode === 'switch' ? join(history, params.targetVersion ?? '') : ''
   const confirm = join(root, 'updates', 'confirmed')
   const exe = join(app, APP_EXE_NAME)
+  const flag = join(root, 'updates', 'error.flag')
   const q = (value: string): string => `"${value}"`
 
   const lines = [
     '@echo off',
     'setlocal',
-    `set "ROOT=${root}"`,
     `set "APP=${app}"`,
-    `set "BACKUP=${backup}"`,
     `set "STAGING=${staging}"`,
+    `set "HISTORY=${history}"`,
+    `set "FROM=${from}"`,
     `set "CONFIRM=${confirm}"`,
     `set "EXE=${exe}"`,
     '',
     'rem 结束所有同名进程，确保 exe 与 app 目录没有句柄占用',
     `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
-    'rem 给文件系统一点时间释放句柄',
     'ping -n 3 127.0.0.1 >nul',
+    '',
+    'rem 归档当前版本：同名目标先删除，move 到不存在的路径才是原子改名',
+    `if not exist ${q(history)} mkdir ${q(history)} >nul 2>&1`,
+    `if not exist ${q(app)} goto fail`,
+    `if exist ${q(from)} rmdir /S /Q ${q(from)} >nul 2>&1`,
+    `move ${q(app)} ${q(from)} >nul 2>&1`,
+    'if errorlevel 1 goto fail',
+    `if exist ${q(app)} goto fail`,
+    `if not exist ${q(fromExe)} goto recover`,
     ''
   ]
 
   if (mode === 'upgrade') {
     lines.push(
-      'rem 备份：同目录原子改名，目标已存在或被占用时 ren 会失败',
-      `if exist ${q(backup)} rmdir /S /Q ${q(backup)} >nul 2>&1`,
-      'set /a TRY=0',
-      ':backup',
-      `if not exist ${q(app)} goto fail`,
-      `ren ${q(app)} app.old >nul 2>&1`,
-      'if not errorlevel 1 goto staged',
-      'set /a TRY+=1',
-      `if %TRY% GEQ 20 goto fail`,
-      'ping -n 2 127.0.0.1 >nul',
-      'goto backup',
-      '',
-      ':staged',
-      'rem 就位：此时 app 已腾空，move 才是改名而非移入子目录',
+      'rem 就位新版本：app 已腾空，move 是改名而非移入子目录',
       `if not exist ${q(staging)} goto recover`,
-      `move /Y ${q(staging)} ${q(app)} >nul 2>&1`,
+      `move ${q(staging)} ${q(app)} >nul 2>&1`,
       'if errorlevel 1 goto recover',
-      `if not exist ${q(app)} goto recover`,
       `if not exist ${q(exe)} goto recover`,
       'goto launch'
     )
   } else {
     lines.push(
-      'rem 回滚：丢弃当前破损应用，把备份改名回 app',
-      `if not exist ${q(backup)} goto fail`,
-      `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
-      `ren ${q(backup)} app >nul 2>&1`,
-      'if errorlevel 1 goto fail',
-      `if not exist ${q(exe)} goto fail`,
-      'goto launch'
+      'rem 就位历史版本：目标目录从归档移出，当前版本已安全留在归档中',
+      `if not exist ${q(target)} goto recover`,
+      `move ${q(target)} ${q(app)} >nul 2>&1`,
+      'if errorlevel 1 goto recover',
+      `if not exist ${q(exe)} goto recover`,
+      'goto switched'
     )
   }
 
   lines.push(
-    'rem 升级中途失败：把已改名的备份恢复为 app，绝不留下空 app',
+    '',
     ':recover',
+    'rem 归档仍在，把当前版本移回 app；先删除可能残缺的 app 避免嵌套移动',
+    `if not exist ${q(fromExe)} goto fail`,
     `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
-    `if not exist ${q(backup)} goto fail`,
-    `ren ${q(backup)} app >nul 2>&1`,
-    'if errorlevel 1 goto fail',
-    'echo upgrade recovered, no new version > "%ROOT%\\updates\\error.flag"',
-    'goto fail',
-    '',
-    ':fail',
-    'echo updater failed > "%ROOT%\\updates\\error.flag"',
-    'goto end',
-    '',
-    ':launch',
-    `start "" ${q(exe)}`,
-    'rem 新版本启动后写确认文件；超时未写则回滚',
-    `set /a N=0`,
-    ':confirm',
-    `if exist ${q(confirm)} goto success`,
-    'ping -n 2 127.0.0.1 >nul',
-    'set /a N+=1',
-    `if %N% GEQ ${ticks} goto rollback`,
-    'goto confirm',
-    '',
-    ':rollback',
-    `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
-    'ping -n 3 127.0.0.1 >nul',
-    'rem 回滚也用 ren，且确认备份存在，避免删除当前 app 后无版本可启',
-    `if not exist ${q(backup)} goto fail`,
-    `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
-    `ren ${q(backup)} app >nul 2>&1`,
+    `if exist ${q(app)} goto fail`,
+    `move ${q(from)} ${q(app)} >nul 2>&1`,
     'if errorlevel 1 goto fail',
     `if not exist ${q(exe)} goto fail`,
     `start "" ${q(exe)}`,
-    'echo rolled back > "%ROOT%\\updates\\error.flag"',
+    `echo version switch recovered, no change > ${q(flag)}`,
+    'goto end',
+    '',
+    ':fail',
+    'rem 归档尚未建立时 app 仍原样存在，尽量启动它',
+    `if exist ${q(exe)} start "" ${q(exe)}`,
+    `echo version switch failed > ${q(flag)}`,
+    'goto end'
+  )
+
+  if (mode === 'upgrade') {
+    lines.push(
+      '',
+      ':launch',
+      `start "" ${q(exe)}`,
+      'rem 新版本启动后写确认文件；超时未写则从归档恢复旧版本',
+      'set /a N=0',
+      ':confirm',
+      `if exist ${q(confirm)} goto success`,
+      'ping -n 2 127.0.0.1 >nul',
+      'set /a N+=1',
+      `if %N% GEQ ${ticks} goto timeout`,
+      'goto confirm',
+      '',
+      ':timeout',
+      `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
+      'ping -n 3 127.0.0.1 >nul',
+      `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
+      `if not exist ${q(fromExe)} goto fail`,
+      `move ${q(from)} ${q(app)} >nul 2>&1`,
+      'if errorlevel 1 goto fail',
+      `if not exist ${q(exe)} goto fail`,
+      `start "" ${q(exe)}`,
+      `echo upgrade timed out, rolled back > ${q(flag)}`,
+      'goto end'
+    )
+  } else {
+    lines.push('', ':switched')
+  }
+
+  lines.push(
     '',
     ':success',
     'endlocal',
@@ -275,6 +318,7 @@ async function extractToStaging(archive: string, stagingDir: string): Promise<vo
 export class Updater {
   private available: UpdateManifest | null = null
   private current: UpdateState
+  private history: AppHistoryEntry[] = []
 
   constructor(private readonly options: UpdaterOptions) {
     this.current = {
@@ -282,14 +326,19 @@ export class Updater {
       currentVersion: options.appVersion,
       available: null,
       readyToApply: false,
-      canRollback: existsSync(options.layout.appBackupDir),
+      canRollback: false,
+      history: [],
       message: '',
       percent: 0
     }
   }
 
   state(): UpdateState {
-    return { ...this.current, available: this.current.available ? { ...this.current.available } : null }
+    return {
+      ...this.current,
+      available: this.current.available ? { ...this.current.available } : null,
+      history: this.history.map((item) => ({ ...item }))
+    }
   }
 
   private publish(patch: Partial<UpdateState>): void {
@@ -301,12 +350,79 @@ export class Updater {
     return this.options.store.getState().config.update.sourceUrl.trim().replace(/\/+$/, '')
   }
 
+  /** 扫描归档目录，按版本号降序刷新历史列表 */
+  async loadHistory(): Promise<AppHistoryEntry[]> {
+    const dir = this.options.layout.updateHistoryDir
+    let names: string[] = []
+    try {
+      const entries = await readdir(dir, { withFileTypes: true })
+      names = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    } catch {
+      names = []
+    }
+    const result: AppHistoryEntry[] = []
+    for (const name of names) {
+      if (!isValidVersionDir(name)) continue
+      const full = join(dir, name)
+      let archivedAt = new Date(0).toISOString()
+      let sizeBytes = 0
+      try {
+        archivedAt = (await stat(full)).mtime.toISOString()
+      } catch {
+        /* 目录在扫描期间被删除，保留默认值 */
+      }
+      sizeBytes = await directorySize(full)
+      result.push({
+        version: name,
+        archivedAt,
+        sizeBytes,
+        launchable: existsSync(join(full, APP_EXE_NAME))
+      })
+    }
+    result.sort((a, b) => compareVersions(b.version, a.version))
+    this.history = result
+    this.publish({ canRollback: result.length > 0 })
+    return result
+  }
+
+  /**
+   * 把旧版 app.old 迁移为历史归档。老用户的 app.old 是升级前的完整 app，
+   * 直接改名到 history/<previousVersion>，避免升级到新机制后旧版本失联。
+   */
+  private async migrateLegacyBackup(): Promise<void> {
+    const backup = this.options.layout.appBackupDir
+    if (!existsSync(backup)) return
+    const previous = this.options.store.getVersion().previousVersion
+    const name = previous && isValidVersionDir(previous) ? previous : 'legacy-backup'
+    const dest = join(this.options.layout.updateHistoryDir, name)
+    await mkdir(this.options.layout.updateHistoryDir, { recursive: true })
+    if (existsSync(dest)) {
+      await removeDirectoryRobust(backup)
+      return
+    }
+    try {
+      await rename(backup, dest)
+    } catch {
+      // 目录被占用时保留原样，不阻断启动
+    }
+  }
+
+  /** 启动初始化：迁移旧备份并载入历史 */
+  async init(): Promise<void> {
+    await this.migrateLegacyBackup()
+    await this.loadHistory()
+  }
+
   /** 写替换脚本与静默启动器并在后台拉起；VBS 负责隐藏脚本执行窗口 */
-  private async launchReplaceScript(mode: 'upgrade' | 'rollback'): Promise<void> {
+  private async launchReplaceScript(params: {
+    mode: 'upgrade' | 'switch'
+    fromVersion: string
+    targetVersion?: string
+  }): Promise<void> {
     const script = join(this.options.layout.updatesDir, 'replace.bat')
     await writeFile(script, buildReplaceScript({
       root: this.options.layout.root,
-      mode
+      ...params
     }), 'utf8')
     const launcher = join(this.options.layout.updatesDir, 'run-silent.vbs')
     await writeFile(launcher, buildSilentLauncher(script), 'utf8')
@@ -440,29 +556,27 @@ export class Updater {
     await rm(this.options.layout.updateConfirmFile, { force: true })
 
     this.publish({ phase: 'restarting', percent: 100, message: '正在重启以完成升级' })
-    await this.launchReplaceScript('upgrade')
+    await this.launchReplaceScript({ mode: 'upgrade', fromVersion: this.options.appVersion })
     this.options.restart()
     return this.state()
   }
 
-  /**
-   * 启动确认。新版本首次启动时调用：版本匹配则写确认文件并清空挂起状态，
-   * 使替换脚本停止等待。版本不匹配时保留挂起状态并记录，便于回滚。
-   */
+  /** 启动确认。新版本首次启动时调用：版本匹配则写确认文件并清空挂起状态 */
   async confirmOnStartup(): Promise<void> {
     const version = this.options.store.getVersion()
     if (!version.pendingVersion) {
       this.publish({
         currentVersion: this.options.appVersion,
-        canRollback: existsSync(this.options.layout.appBackupDir),
         message: version.lastMessage
       })
+      await this.loadHistory()
       return
     }
     if (version.pendingVersion !== this.options.appVersion) {
       await this.options.store.updateVersion((draft) => {
         draft.lastMessage = `版本不一致：期望 ${version.pendingVersion}，实际 ${this.options.appVersion}`
       })
+      await this.loadHistory()
       return
     }
     await writeFile(this.options.layout.updateConfirmFile, this.options.appVersion, 'utf8')
@@ -476,45 +590,77 @@ export class Updater {
       phase: 'idle',
       currentVersion: this.options.appVersion,
       readyToApply: false,
-      canRollback: existsSync(this.options.layout.appBackupDir),
       message: `已升级到 ${this.options.appVersion}`
     })
+    await this.loadHistory()
   }
 
-  /** 回滚到上一版本：改写版本状态后启动反向替换脚本 */
-  async rollback(): Promise<void> {
-    if (!existsSync(this.options.layout.appBackupDir)) throw new Error('没有可回滚的旧版本')
-    const version = this.options.store.getVersion()
-    const target = version.previousVersion ?? version.currentVersion
+  /**
+   * 回退到指定历史版本：先改写版本状态，再启动 switch 脚本。
+   * 历史版本已验证可运行，脚本就位后直接启动并退出，不进入确认等待。
+   */
+  async rollbackTo(versionId: string): Promise<void> {
+    if (!isValidVersionDir(versionId)) throw new Error('版本号不合法')
+    // 直接校验磁盘上的归档目录，不依赖内存列表，避免列表未刷新时误判
+    if (!existsSync(join(this.options.layout.updateHistoryDir, versionId, APP_EXE_NAME))) {
+      throw new Error(`历史版本 ${versionId} 不存在或已损坏`)
+    }
+    if (compareVersions(versionId, this.options.appVersion) === 0) {
+      throw new Error('不能回退到当前正在运行的版本')
+    }
     await this.options.store.updateVersion((draft) => {
-      draft.currentVersion = target
+      draft.currentVersion = versionId
       draft.pendingVersion = null
       draft.previousVersion = null
-      draft.lastMessage = `已回滚到 ${target}`
+      draft.lastMessage = `已回退到 ${versionId}`
     })
     await rm(this.options.layout.updateConfirmFile, { force: true })
 
-    this.publish({ phase: 'restarting', message: '正在回滚', percent: 100 })
-    await this.launchReplaceScript('rollback')
+    this.publish({ phase: 'restarting', message: `正在回退到 ${versionId}`, percent: 100 })
+    await this.launchReplaceScript({
+      mode: 'switch',
+      fromVersion: this.options.appVersion,
+      targetVersion: versionId
+    })
     this.options.restart()
   }
 
-  /** 删除保留的上一版本目录，释放磁盘空间 */
-  async discardOld(): Promise<void> {
-    const dir = this.options.layout.appBackupDir
+  /** 兼容旧入口：回退到历史列表中的最新版本 */
+  async rollback(): Promise<void> {
+    const list = await this.loadHistory()
+    const target = list.find((item) => item.launchable && compareVersions(item.version, this.options.appVersion) !== 0)
+    if (!target) throw new Error('没有可回退的历史版本')
+    await this.rollbackTo(target.version)
+  }
+
+  /** 删除指定历史版本归档，释放磁盘空间；当前运行版本不可删除 */
+  async discardVersion(versionId: string): Promise<void> {
+    if (!isValidVersionDir(versionId)) throw new Error('版本号不合法')
+    if (compareVersions(versionId, this.options.appVersion) === 0) {
+      throw new Error('当前运行版本不能删除')
+    }
+    const dir = join(this.options.layout.updateHistoryDir, versionId)
     if (!existsSync(dir)) {
-      this.publish({ canRollback: false })
+      await this.loadHistory()
       return
     }
     const result = await removeDirectoryRobust(dir)
     if (!result.removed) {
-      // 不向界面抛出 ENOTEMPTY 之类的原始系统调用错误，给出可操作的处理方式
       const hint = result.residue
         ? `文件仍被占用，已移至 ${result.residue}，重启后可手动删除`
-        : '目录被占用，请关闭 EnvDock 后手动删除 app.old 文件夹'
+        : '目录被占用，请关闭 EnvDock 后手动删除该版本目录'
       throw new Error(hint)
     }
-    this.publish({ canRollback: false, message: '已清理上一版本' })
+    await this.loadHistory()
+    this.publish({ message: `已删除历史版本 ${versionId}` })
+  }
+
+  /** 兼容旧入口：删除历史列表中最旧的版本 */
+  async discardOld(): Promise<void> {
+    const list = await this.loadHistory()
+    const target = [...list].sort((a, b) => compareVersions(a.version, b.version))[0]
+    if (!target) return
+    await this.discardVersion(target.version)
   }
 
   /** 读取版本状态，供界面展示当前版本与挂起信息 */

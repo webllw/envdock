@@ -24,7 +24,9 @@ export const LAYOUT = {
   updates: 'updates',
   updateDownload: join('updates', 'download'),
   updateStaging: join('updates', 'staging'),
-  updateConfirm: join('updates', 'confirmed')
+  updateConfirm: join('updates', 'confirmed'),
+  /** 历史版本归档，每个版本一个以版本号命名的子目录 */
+  updateHistory: join('updates', 'history')
 } as const
 
 /** 环境根目录的完整路径集合，均为绝对路径 */
@@ -45,6 +47,7 @@ export interface Layout {
   updateDownloadDir: string
   updateStagingDir: string
   updateConfirmFile: string
+  updateHistoryDir: string
 }
 
 /** 由根目录推导全部绝对路径 */
@@ -66,7 +69,8 @@ export function createLayout(root: string): Layout {
     updatesDir: join(base, LAYOUT.updates),
     updateDownloadDir: join(base, LAYOUT.updateDownload),
     updateStagingDir: join(base, LAYOUT.updateStaging),
-    updateConfirmFile: join(base, LAYOUT.updateConfirm)
+    updateConfirmFile: join(base, LAYOUT.updateConfirm),
+    updateHistoryDir: join(base, LAYOUT.updateHistory)
   }
 }
 

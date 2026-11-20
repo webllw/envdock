@@ -88,7 +88,9 @@ interface AppState {
   checkUpdate: (silent?: boolean) => Promise<UpdateManifest | null>
   applyUpdate: () => Promise<void>
   rollbackUpdate: () => Promise<void>
+  rollbackToVersion: (versionId: string) => Promise<void>
   discardOldVersion: () => Promise<void>
+  discardVersion: (versionId: string) => Promise<void>
   setUpdSource: (sourceUrl: string, autoCheck: boolean) => Promise<void>
   loadUpdateState: () => Promise<void>
   setUpdateState: (state: UpdateState) => void
@@ -121,7 +123,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   wizard: emptyWizard,
   update: {
     phase: 'idle', currentVersion: '', available: null,
-    readyToApply: false, canRollback: false, message: '', percent: 0
+    readyToApply: false, canRollback: false, history: [], message: '', percent: 0
   },
   toast: null,
 
@@ -378,7 +380,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   rollbackUpdate: async () => {
-    if (!window.confirm('将回滚到上一版本并重启应用，确认继续？')) return
     try {
       await api.rollbackUpdate()
       get().showToast('正在回滚，应用即将重启', 'info')
@@ -387,14 +388,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  rollbackToVersion: async (versionId) => {
+    try {
+      await api.rollbackToVersion(versionId)
+      get().showToast(`正在回退到 v${versionId}，应用即将重启`, 'info')
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : '回退失败', 'warning')
+    }
+  },
+
   discardOldVersion: async () => {
-    if (!window.confirm('删除上一版本后无法回滚，确认继续？')) return
     try {
       await api.discardOldVersion()
       await get().loadUpdateState()
       get().showToast('已清理上一版本', 'success')
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '清理失败', 'warning')
+    }
+  },
+
+  discardVersion: async (versionId) => {
+    try {
+      await api.discardVersion(versionId)
+      await get().loadUpdateState()
+      get().showToast(`历史版本 v${versionId} 已删除`, 'success')
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : '删除失败', 'warning')
     }
   },
 

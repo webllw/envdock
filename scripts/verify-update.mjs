@@ -93,8 +93,9 @@ const checks = [
   ['迁移补齐 closeBehavior 字段', result.migrationFillsCloseBehavior],
   ['版本状态迁移保留挂起', result.versionMigrationKeepsPending],
   ['语义版本比较', result.compareOk],
-  ['升级替换脚本按进程名清理且无 PID 轮询', result.scriptUpgradeOk],
-  ['回滚替换脚本按进程名清理', result.scriptRollbackOk],
+  ['升级脚本归档当前版本并等待确认', result.scriptUpgradeOk],
+  ['回退脚本就位后立即启动不轮询确认', result.scriptRollbackOk],
+  ['版本目录名拒绝路径穿越', result.versionDirGuard],
   ['静默启动器隐藏窗口', result.silentLauncher],
   ['Atom feed 检查发现新版本', result.checkOk],
   ['下载校验解压完成', result.prepareOk],
@@ -104,7 +105,10 @@ const checks = [
   ['启动确认写入标记', result.confirmOk],
   ['确认后清空挂起', result.pendingCleared],
   ['manifest 根路径回填', result.manifestRootOk],
-  ['清理上一版本嵌套目录', result.discardOk]
+  ['历史版本降序列表与可启动判定', result.historyListOk],
+  ['回退到指定版本且损坏版本被拒', result.rollbackToVersionOk],
+  ['删除指定历史版本且保护当前版本', result.discardOk],
+  ['旧 app.old 迁移为历史归档', result.legacyMigrated]
 ]
 
 let failed = 0
@@ -114,7 +118,7 @@ for (const [name, ok] of checks) {
 }
 console.log(`\n进度阶段：${result.phases.join(' → ')}`)
 
-await rm(root, { recursive: true, force: true })
+await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 200 })
 if (failed > 0) {
   console.error(`\n${failed} 项验证失败`)
   process.exit(1)

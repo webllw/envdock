@@ -54,6 +54,7 @@ export class Engine {
     // 网络层按需读取实时配置，配置变更无需重新注入；此处只建立一次性绑定
     setProxyProvider(() => this.store.getState().config.proxy)
     await this.refreshActivationArtifacts()
+    await this.updater.init()
     await this.updater.confirmOnStartup()
   }
 
@@ -76,8 +77,16 @@ export class Engine {
     await this.updater.rollback()
   }
 
+  async rollbackToVersion(versionId: string): Promise<void> {
+    await this.updater.rollbackTo(versionId)
+  }
+
   async discardOldVersion(): Promise<void> {
     await this.updater.discardOld()
+  }
+
+  async discardVersion(versionId: string): Promise<void> {
+    await this.updater.discardVersion(versionId)
   }
 
   getUpdateState(): UpdateState {

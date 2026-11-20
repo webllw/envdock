@@ -197,6 +197,7 @@ export class Store {
     await mkdir(this.layout.currentBinDir, { recursive: true })
     await mkdir(this.layout.updatesDir, { recursive: true })
     await mkdir(this.layout.updateDownloadDir, { recursive: true })
+    await mkdir(this.layout.updateHistoryDir, { recursive: true })
 
     const loadedState = await readJson<unknown>(this.layout.stateFile)
     const migratedState = migrateState(loadedState)

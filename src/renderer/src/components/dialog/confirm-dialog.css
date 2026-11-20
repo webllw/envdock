@@ -1,0 +1,69 @@
+.confirm-modal {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  animation: modal-in 0.18s ease;
+}
+
+.confirm-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.confirm-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+}
+
+.confirm-icon-danger {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.confirm-icon-primary {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.confirm-modal-x {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+.confirm-modal-x:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.confirm-modal h2 {
+  margin-top: 14px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.confirm-desc {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.confirm-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
