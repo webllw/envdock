@@ -33,40 +33,58 @@ export async function verifyChecksum(file: string, expected: string, algorithm: 
   return hash.digest('hex').toLowerCase() === expected.toLowerCase()
 }
 
+/** 连续多少毫秒收不到任何字节才判定链路失效；持续传输的慢速下载不受总时长限制 */
+const DOWNLOAD_IDLE_MS = 30_000
+
 export async function downloadBytes(
   url: string,
   dest: string,
   onBytes: (received: number, total: number) => void
 ): Promise<void> {
-  const response = await requestFetch(url, {
-    headers: { 'user-agent': 'EnvDock/0.1' },
-    signal: AbortSignal.timeout(120_000)
-  })
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${url}`)
-  if (!response.body) throw new Error(`响应无内容 ${url}`)
+  // 升级包约 60MB，代理链路上耗时可能远超固定总时长。用空闲超时替代总时长超时：
+  // 每收到一批字节就重置计时器，只有长时间完全没有数据才中止，慢速下载不会被误杀。
+  const controller = new AbortController()
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  const armIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(new Error('下载长时间无响应')), DOWNLOAD_IDLE_MS)
+  }
+  armIdle()
 
-  const total = Number(response.headers.get('content-length') ?? 0)
-  await mkdir(dirname(dest), { recursive: true })
-  const writer = createWriteStream(dest)
-  let received = 0
-
+  let writer: ReturnType<typeof createWriteStream> | undefined
   try {
+    const response = await requestFetch(url, {
+      headers: { 'user-agent': 'EnvDock/0.1' },
+      signal: controller.signal
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${url}`)
+    if (!response.body) throw new Error(`响应无内容 ${url}`)
+
+    const total = Number(response.headers.get('content-length') ?? 0)
+    await mkdir(dirname(dest), { recursive: true })
+    const output = createWriteStream(dest)
+    writer = output
+    let received = 0
+
     const reader = response.body.getReader()
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      armIdle()
       received += value.byteLength
-      if (!writer.write(Buffer.from(value))) {
-        await new Promise<void>((resolve) => writer.once('drain', resolve))
+      if (!output.write(Buffer.from(value))) {
+        await new Promise<void>((resolve) => output.once('drain', resolve))
       }
       onBytes(received, total)
     }
     await new Promise<void>((resolve, reject) => {
-      writer.end((error?: Error | null) => (error ? reject(error) : resolve()))
+      output.end((error?: Error | null) => (error ? reject(error) : resolve()))
     })
   } catch (error) {
-    writer.destroy()
+    writer?.destroy()
     throw error
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer)
   }
 }
 

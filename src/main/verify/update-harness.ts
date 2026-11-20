@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
-import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, isValidVersionDir, APP_EXE_NAME } from '@main/core/updater'
+import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, isValidVersionDir, APP_EXE_NAME, VERSION_MARKER } from '@main/core/updater'
 
 export async function runUpdateHarness(root: string, sourceUrl: string, packageFileName: string, webBase: string) {
   const layout = createLayout(root)
@@ -41,7 +41,9 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareVersions('0.1.0', '0.2.0') === -1
 
   // 4. 替换脚本：升级归档当前版本并等待确认；回退到指定版本就位后立即启动
-  const upgradeScript = buildReplaceScript({ root, mode: 'upgrade', fromVersion: '0.1.0' })
+  const upgradeScript = buildReplaceScript({
+    root, mode: 'upgrade', fromVersion: '0.1.0', targetVersion: '0.2.0'
+  })
   const switchScript = buildReplaceScript({
     root, mode: 'switch', fromVersion: '0.1.0', targetVersion: '0.0.9'
   })
@@ -63,6 +65,16 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const scriptRollbackOk = switchScript.includes(`move "${history}\\0.0.9" "${root}\\app"`) &&
     switchScript.includes(':switched') && !switchScript.includes(':confirm') &&
     !switchScript.includes(':timeout') && switchScript.includes(':recover') && killsByName
+  // 归档/就位/恢复都带退避重试，避免 app.asar 被 Defender 短暂占用时静默重启旧版
+  const retryGuarded = upgradeScript.includes(':archive_wait') &&
+    upgradeScript.includes(':place_wait') && upgradeScript.includes(':recover_rm') &&
+    upgradeScript.includes(':recover_retry') && upgradeScript.includes('set /a A+=1') &&
+    upgradeScript.includes('set /a P+=1') && upgradeScript.includes('set /a R+=1') &&
+    upgradeScript.includes(`if %A% GEQ 12 goto fail`)
+  // 就位后核对版本标记，防止 staging 未真正移入却误启动旧 exe
+  const versionMarked = upgradeScript.includes(`set /p V=<"${root}\\app\\${VERSION_MARKER}"`) &&
+    upgradeScript.includes('if not "%V%"=="0.2.0" goto recover') &&
+    upgradeScript.includes(`if exist "${join(root, 'updates', 'error.flag')}" del /F /Q`)
   const versionDirGuard = isValidVersionDir('1.0.6') && isValidVersionDir('2.2.32-LTS') &&
     !isValidVersionDir('../evil') && !isValidVersionDir('a\\b') && !isValidVersionDir('..')
 
@@ -77,7 +89,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     appVersion: '0.1.0',
     emit: (state) => events.push(state.phase),
     restart: () => undefined,
-    webBase
+    webBase,
+    launchScript: () => undefined
   })
 
   const manifest = await updater.check()
@@ -87,7 +100,17 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const prepareOk = prepared.readyToApply && prepared.phase === 'available'
   const stagedExe = join(layout.updateStagingDir, appName())
   const stagedOk = await stat(stagedExe).then(() => true, () => false)
-  const downloadOk = await stat(join(layout.updateDownloadDir, packageFileName)).then(() => true, () => false)
+  const cachedZip = join(layout.updateDownloadDir, packageFileName)
+  const downloadOk = await stat(cachedZip).then(() => true, () => false)
+  const stagedMarker = await readFile(join(layout.updateStagingDir, VERSION_MARKER), 'utf8').catch(() => '')
+  const markerOk = stagedMarker.trim() === '0.2.0'
+
+  // 缓存复用：已下载并校验通过的包再次 prepare 不应重新走网络。
+  // 把本地缓存 mtime 固定下来，重跑后未变化即证明没有重新下载。
+  const beforeReuse = (await stat(cachedZip)).mtimeMs
+  const reprepared = await updater.prepare()
+  const afterReuse = (await stat(cachedZip)).mtimeMs
+  const cacheReuseOk = reprepared.readyToApply && beforeReuse === afterReuse && markerOk
 
   // 6. 写入挂起状态（模拟 apply 的版本写入部分，不真正 spawn 脚本）
   await store.updateVersion((draft) => {
@@ -104,7 +127,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     store: newStore,
     appVersion: '0.2.0',
     emit: () => undefined,
-    restart: () => undefined
+    restart: () => undefined,
+    launchScript: () => undefined
   })
   await confirming.confirmOnStartup()
   const confirmOk = await stat(layout.updateConfirmFile).then(() => true, () => false)
@@ -138,7 +162,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
       historyCanRollback = state.canRollback
       lastHistory = state.history.map((h) => h.version).join(',')
     },
-    restart: () => undefined
+    restart: () => undefined,
+    launchScript: () => undefined
   })
   // 下载目录里已有 prepare 缓存的 EnvDock-0.2.0-app.zip，应作为 package 来源并入
   const entries = await listing.loadHistory()
@@ -166,7 +191,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     store: newStore,
     appVersion: '0.2.0',
     emit: () => undefined,
-    restart: () => { rollbackStarted = true }
+    restart: () => { rollbackStarted = true },
+    launchScript: () => undefined
   })
   await switcher.rollbackTo('0.1.0')
   const afterRollback = newStore.getVersion()
@@ -186,7 +212,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     store: newStore,
     appVersion: '0.2.0',
     emit: (state) => { discardEmittedCanRollback = state.canRollback },
-    restart: () => undefined
+    restart: () => undefined,
+    launchScript: () => undefined
   })
   await discarding.discardVersion('0.0.9')
   const discardOk = await stat(v009).then(() => false, () => true) &&
@@ -205,7 +232,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     store: newStore,
     appVersion: '0.2.0',
     emit: () => undefined,
-    restart: () => { packageRollbackStarted = true }
+    restart: () => { packageRollbackStarted = true },
+    launchScript: () => undefined
   })
   await packageRollback.rollbackTo('0.1.6')
   const restoredExe = join(layout.updateHistoryDir, '0.1.6', APP_EXE_NAME)
@@ -234,12 +262,16 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     compareOk,
     scriptUpgradeOk,
     scriptRollbackOk,
+    retryGuarded,
+    versionMarked,
     versionDirGuard,
     silentLauncher,
     checkOk,
     prepareOk,
     stagedOk,
     downloadOk,
+    markerOk,
+    cacheReuseOk,
     pendingPersisted,
     confirmOk,
     pendingCleared,

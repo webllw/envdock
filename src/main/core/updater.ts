@@ -25,8 +25,14 @@ import type { Store } from './store'
 /** 打包产物的可执行文件名，与 electron-builder 的 productName 对应 */
 export const APP_EXE_NAME = 'EnvDock.exe'
 
-/** 替换脚本等待新版本写确认文件的轮询次数，每次约 0.5 秒，超时触发回滚 */
-const CONFIRM_WAIT_TICKS = 60
+/** 替换脚本等待新版本写确认文件的轮询次数，每次约 1 秒，超时触发回滚 */
+const CONFIRM_WAIT_TICKS = 120
+
+/** prepare 写入 staging 的版本标记文件名，替换脚本据此核对就位的确是目标版本 */
+export const VERSION_MARKER = 'ENV_DOCK_VERSION'
+
+/** 归档/就位失败时的退避重试次数，覆盖 Defender 等短暂占用目录的窗口 */
+const MOVE_RETRY_LIMIT = 12
 
 /** 版本目录名只允许普通版本字符，防止归档路径穿越 */
 const VERSION_DIR_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/
@@ -46,6 +52,8 @@ export interface UpdaterOptions {
   restart: () => void
   /** GitHub 网页根地址覆盖，仅用于验证环境指向本地服务 */
   webBase?: string
+  /** 替换脚本启动钩子；验证环境注入空实现，避免真实 spawn 占用脚本文件 */
+  launchScript?: (scriptPath: string) => void
 }
 
 /**
@@ -174,6 +182,7 @@ export function buildReplaceScript(params: {
   const confirm = join(root, 'updates', 'confirmed')
   const exe = join(app, APP_EXE_NAME)
   const flag = join(root, 'updates', 'error.flag')
+  const marker = join(app, VERSION_MARKER)
   const q = (value: string): string => `"${value}"`
 
   const lines = [
@@ -185,60 +194,117 @@ export function buildReplaceScript(params: {
     `set "FROM=${from}"`,
     `set "CONFIRM=${confirm}"`,
     `set "EXE=${exe}"`,
+    `set "FLAG=${flag}"`,
+    `set "MARKER=${marker}"`,
     '',
-    'rem 结束所有同名进程，确保 exe 与 app 目录没有句柄占用',
+    'rem 先清除旧标记，只有本次执行失败才留下 error.flag',
+    `if exist ${q(flag)} del /F /Q ${q(flag)} >nul 2>&1`,
+    '',
+    'rem 结束所有同名进程，留出句柄释放时间',
     `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
-    'ping -n 3 127.0.0.1 >nul',
+    'ping -n 4 127.0.0.1 >nul',
     '',
-    'rem 归档当前版本：同名目标先删除，move 到不存在的路径才是原子改名',
+    'rem 归档当前版本：同名目标必须先删净，否则 move 会移入目录造成嵌套',
     `if not exist ${q(history)} mkdir ${q(history)} >nul 2>&1`,
     `if not exist ${q(app)} goto fail`,
+    'set /a A=0',
+    '',
+    ':archive',
     `if exist ${q(from)} rmdir /S /Q ${q(from)} >nul 2>&1`,
+    `if exist ${q(from)} goto archive_wait`,
     `move ${q(app)} ${q(from)} >nul 2>&1`,
-    'if errorlevel 1 goto fail',
-    `if exist ${q(app)} goto fail`,
+    'if errorlevel 1 goto archive_wait',
+    `if exist ${q(app)} goto archive_wait`,
     `if not exist ${q(fromExe)} goto recover`,
-    ''
+    'goto archived',
+    '',
+    ':archive_wait',
+    'set /a A+=1',
+    `if %A% GEQ ${MOVE_RETRY_LIMIT} goto fail`,
+    'ping -n 2 127.0.0.1 >nul',
+    'goto archive',
+    '',
+    ':archived'
   ]
 
   if (mode === 'upgrade') {
     lines.push(
       'rem 就位新版本：app 已腾空，move 是改名而非移入子目录',
       `if not exist ${q(staging)} goto recover`,
+      'set /a P=0',
+      '',
+      ':place',
       `move ${q(staging)} ${q(app)} >nul 2>&1`,
-      'if errorlevel 1 goto recover',
+      'if errorlevel 1 goto place_wait',
+      `if exist ${q(staging)} goto place_wait`,
       `if not exist ${q(exe)} goto recover`,
-      'goto launch'
+      // 版本标记由 prepare 写入 staging；缺失或不符说明就位的仍是旧版，立即恢复
+      'set "V="',
+      `if exist ${q(marker)} set /p V=<${q(marker)}`,
+      `if not "%V%"=="${params.targetVersion ?? ''}" goto recover`,
+      'goto launch',
+      '',
+      ':place_wait',
+      'set /a P+=1',
+      `if %P% GEQ ${MOVE_RETRY_LIMIT} goto recover`,
+      'ping -n 2 127.0.0.1 >nul',
+      'goto place'
     )
   } else {
     lines.push(
       'rem 就位历史版本：目标目录从归档移出，当前版本已安全留在归档中',
       `if not exist ${q(target)} goto recover`,
+      'set /a P=0',
+      '',
+      ':place',
       `move ${q(target)} ${q(app)} >nul 2>&1`,
-      'if errorlevel 1 goto recover',
+      'if errorlevel 1 goto place_wait',
+      `if exist ${q(target)} goto place_wait`,
       `if not exist ${q(exe)} goto recover`,
-      'goto switched'
+      'goto switched',
+      '',
+      ':place_wait',
+      'set /a P+=1',
+      `if %P% GEQ ${MOVE_RETRY_LIMIT} goto recover`,
+      'ping -n 2 127.0.0.1 >nul',
+      'goto place'
     )
   }
 
   lines.push(
     '',
     ':recover',
-    'rem 归档仍在，把当前版本移回 app；先删除可能残缺的 app 避免嵌套移动',
+    'rem 归档仍在，把当前版本移回 app；删除残缺 app 与移回都带退避重试',
     `if not exist ${q(fromExe)} goto fail`,
-    `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
-    `if exist ${q(app)} goto fail`,
+    'set /a R=0',
+    '',
+    ':recover_rm',
+    `if not exist ${q(app)} goto recover_move`,
+    `rmdir /S /Q ${q(app)} >nul 2>&1`,
+    `if not exist ${q(app)} goto recover_move`,
+    'set /a R+=1',
+    `if %R% GEQ ${MOVE_RETRY_LIMIT} goto fail`,
+    'ping -n 2 127.0.0.1 >nul',
+    'goto recover_rm',
+    '',
+    ':recover_move',
     `move ${q(from)} ${q(app)} >nul 2>&1`,
-    'if errorlevel 1 goto fail',
+    'if errorlevel 1 goto recover_retry',
     `if not exist ${q(exe)} goto fail`,
     `start "" ${q(exe)}`,
-    `echo version switch recovered, no change > ${q(flag)}`,
+    `echo 升级未完成，已恢复原版本 > ${q(flag)}`,
     'goto end',
     '',
+    ':recover_retry',
+    'set /a R+=1',
+    `if %R% GEQ ${MOVE_RETRY_LIMIT} goto fail`,
+    'ping -n 2 127.0.0.1 >nul',
+    'goto recover_move',
+    '',
     ':fail',
-    'rem 归档尚未建立时 app 仍原样存在，尽量启动它',
+    'rem 归档尚未建立时 app 仍原样存在，尽量启动它并留下标记',
     `if exist ${q(exe)} start "" ${q(exe)}`,
-    `echo version switch failed > ${q(flag)}`,
+    `echo 升级失败，请查看 updates 目录 > ${q(flag)}`,
     'goto end'
   )
 
@@ -259,14 +325,7 @@ export function buildReplaceScript(params: {
       ':timeout',
       `taskkill /F /IM ${APP_EXE_NAME} >nul 2>&1`,
       'ping -n 3 127.0.0.1 >nul',
-      `if exist ${q(app)} rmdir /S /Q ${q(app)} >nul 2>&1`,
-      `if not exist ${q(fromExe)} goto fail`,
-      `move ${q(from)} ${q(app)} >nul 2>&1`,
-      'if errorlevel 1 goto fail',
-      `if not exist ${q(exe)} goto fail`,
-      `start "" ${q(exe)}`,
-      `echo upgrade timed out, rolled back > ${q(flag)}`,
-      'goto end'
+      'goto recover'
     )
   } else {
     lines.push('', ':switched')
@@ -317,9 +376,11 @@ async function extractAppArchive(archive: string, targetDir: string): Promise<vo
   if (!existsSync(exePath)) throw new Error(`升级包缺少 ${APP_EXE_NAME}`)
 }
 
-/** 把升级包解压到 staging；升级包内容是 app 目录的直接内容 */
-async function extractToStaging(archive: string, stagingDir: string): Promise<void> {
+/** 把升级包解压到 staging 并写入版本标记，供替换脚本核对就位内容 */
+async function extractToStaging(archive: string, stagingDir: string, version: string): Promise<void> {
   await extractAppArchive(archive, stagingDir)
+  // 末尾补回车换行，cmd 的 set /p 读到行尾才把值赋给变量
+  await writeFile(join(stagingDir, VERSION_MARKER), `${version}\r\n`, 'utf8')
 }
 
 export class Updater {
@@ -493,6 +554,11 @@ export class Updater {
     const launcher = join(this.options.layout.updatesDir, 'run-silent.vbs')
     await writeFile(launcher, buildSilentLauncher(script), 'utf8')
 
+    if (this.options.launchScript) {
+      this.options.launchScript(launcher)
+      return
+    }
+
     // 优先用 wscript 静默执行；不可用时退回 cmd.exe，仍保留 windowsHide
     const child = spawn('wscript.exe', ['//B', launcher], {
       cwd: this.options.layout.root,
@@ -574,26 +640,37 @@ export class Updater {
     // 文件名来自第三方 release 资产，收敛为 basename 避免路径逃逸
     const dest = join(this.options.layout.updateDownloadDir, basename(manifest.fileName))
 
-    this.publish({ phase: 'downloading', message: '正在下载升级包', percent: 0 })
-    await rm(`${dest}.part`, { force: true })
-    await downloadBytes(url, `${dest}.part`, (received, total) => {
-      const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : -1
-      this.publish({
-        phase: 'downloading',
-        percent,
-        message: `下载中 ${(received / 1024 / 1024).toFixed(1)} MB`
-      })
-    })
-
-    this.publish({ phase: 'verifying', message: '正在校验升级包', percent: 99 })
-    if (!(await verifyChecksum(`${dest}.part`, manifest.sha256, 'sha256'))) {
-      await rm(`${dest}.part`, { force: true })
-      throw new Error('升级包校验失败，可能下载不完整')
+    // 已下载并校验通过的包直接复用。上次下载完成但升级未生效时，缓存仍在，
+    // 重试无需再次传输 60MB；损坏或上次中断残留的缓存删除后重新下载。
+    let reusable = false
+    if (existsSync(dest)) {
+      this.publish({ phase: 'verifying', message: '正在校验已下载的升级包', percent: 50 })
+      reusable = await verifyChecksum(dest, manifest.sha256, 'sha256')
+      if (!reusable) await rm(dest, { force: true })
     }
-    await rename(`${dest}.part`, dest)
+
+    if (!reusable) {
+      this.publish({ phase: 'downloading', message: '正在下载升级包', percent: 0 })
+      await rm(`${dest}.part`, { force: true })
+      await downloadBytes(url, `${dest}.part`, (received, total) => {
+        const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : -1
+        this.publish({
+          phase: 'downloading',
+          percent,
+          message: `下载中 ${(received / 1024 / 1024).toFixed(1)} MB`
+        })
+      })
+
+      this.publish({ phase: 'verifying', message: '正在校验升级包', percent: 99 })
+      if (!(await verifyChecksum(`${dest}.part`, manifest.sha256, 'sha256'))) {
+        await rm(`${dest}.part`, { force: true })
+        throw new Error('升级包校验失败，可能下载不完整')
+      }
+      await rename(`${dest}.part`, dest)
+    }
 
     this.publish({ phase: 'extracting', message: '正在准备升级文件', percent: 100 })
-    await extractToStaging(dest, this.options.layout.updateStagingDir)
+    await extractToStaging(dest, this.options.layout.updateStagingDir, manifest.version)
 
     this.publish({
       phase: 'available',
@@ -622,7 +699,11 @@ export class Updater {
     await rm(this.options.layout.updateConfirmFile, { force: true })
 
     this.publish({ phase: 'restarting', percent: 100, message: '正在重启以完成升级' })
-    await this.launchReplaceScript({ mode: 'upgrade', fromVersion: this.options.appVersion })
+    await this.launchReplaceScript({
+      mode: 'upgrade',
+      fromVersion: this.options.appVersion,
+      targetVersion: manifest.version
+    })
     this.options.restart()
     return this.state()
   }
@@ -631,9 +712,22 @@ export class Updater {
   async confirmOnStartup(): Promise<void> {
     const version = this.options.store.getVersion()
     if (!version.pendingVersion) {
+      // 替换脚本失败时会在 updates/error.flag 留下原因；读出来告知用户后清除，
+      // 避免用户只看到版本没变却不知道升级已被回滚。
+      let message = version.lastMessage
+      const flag = join(this.options.layout.updatesDir, 'error.flag')
+      if (existsSync(flag)) {
+        try {
+          const detail = (await readFile(flag, 'utf8')).trim()
+          if (detail) message = `上次升级未完成：${detail}`
+        } catch {
+          /* 标记读取失败时保留原提示 */
+        }
+        await rm(flag, { force: true })
+      }
       this.publish({
         currentVersion: this.options.appVersion,
-        message: version.lastMessage
+        message
       })
       await this.loadHistory()
       return
