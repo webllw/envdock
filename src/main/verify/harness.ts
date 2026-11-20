@@ -1,10 +1,13 @@
 /** 验证脚本用的引擎调用入口，不参与应用构建 */
 import { join } from 'node:path'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store } from '@main/core/store'
-import { detectInstalled, extractZip, writeVersionMetadata } from '@main/providers/runtime'
+import { detectInstalled, extractZip, installSingleFile, writeVersionMetadata } from '@main/providers/runtime'
 import { writeActivationScripts, writeCurrentShims, type ActiveTool } from '@main/core/activations'
+import { pickCompatibleVersion, parsePhpVersionNumber } from '@main/providers/composer'
+import { isUserVisibleTool, INTERNAL_TOOL_META } from '@shared/tools'
+import { allToolMetadata } from '@main/providers/registry'
 import type { VersionInfo } from '@shared/domain'
 
 export async function runHarness(root: string, archive: string) {
@@ -59,6 +62,53 @@ export async function runHarness(root: string, archive: string) {
   const mavenShimTargetsCmd = mvnShim.includes('mvn.cmd') && !mvnShim.includes('mvn.exe')
   const mavenShimCarriesJavaHome = mvnShim.includes('JAVA_HOME')
 
+  // Composer：单文件 phar 安装、launcher 以 php 执行、垫片指向 composer.cmd、隐藏工具不进用户列表
+  const phar = join(root, 'composer.phar')
+  await writeFile(phar, Buffer.from('fake-php-archive'))
+  const composerVersion: VersionInfo = {
+    id: '2.11.2',
+    display: '2.11.2',
+    channel: 'stable',
+    releasedAt: ''
+  }
+  const composerDir = join(layout.runtimesDir, 'composer', composerVersion.id)
+  await installSingleFile(phar, composerDir, 'composer.phar')
+  const pharInstalled = await stat(join(composerDir, 'composer.phar')).then(() => true, () => false)
+  // launcher 由 provider.install 写入；此处复现同一份内容验证调用方式
+  const launcher = '@php "%~dp0composer.phar" %*\r\n'
+  await writeFile(join(composerDir, 'composer.cmd'), launcher, 'utf8')
+  const launcherUsesPhp = (await readFile(join(composerDir, 'composer.cmd'), 'utf8')).includes('@php "')
+  await writeVersionMetadata(composerDir, composerVersion)
+  const composerDetected = (await detectInstalled(root, 'composer')).length
+
+  const activeWithComposer: ActiveTool[] = [
+    ...active,
+    {
+      toolId: 'composer',
+      relativeBinDir: 'runtimes/composer/2.11.2',
+      envVars: {}
+    }
+  ]
+  await writeCurrentShims(layout, activeWithComposer)
+  await writeActivationScripts(layout, activeWithComposer)
+  const composerShim = await readFile(join(layout.currentBinDir, 'composer.cmd'), 'utf8')
+  const composerShimTargetsCmd = composerShim.includes('composer.cmd') && !composerShim.includes('composer.exe')
+
+  // min-php 选版：新 PHP 取最新，老 PHP 回退到 LTS，无法解析时取最新
+  const candidates: VersionInfo[] = [
+    { id: '2.11.2', display: '2.11.2', channel: 'stable', releasedAt: '' },
+    { id: '2.2.32', display: '2.2.32', channel: 'lts', releasedAt: '' }
+  ]
+  const minPhp = new Map([['2.11.2', 70205], ['2.2.32', 50300]])
+  const pickedNew = pickCompatibleVersion(candidates, minPhp, '8.3.12')?.id
+  const pickedOld = pickCompatibleVersion(candidates, minPhp, '5.6.40')?.id
+  const pickedUnknown = pickCompatibleVersion(candidates, minPhp, 'dev-master')?.id
+  const phpVersionParsed = parsePhpVersionNumber('7.2.5') === 70205
+
+  const composerHidden = !isUserVisibleTool('composer') &&
+    INTERNAL_TOOL_META.id === 'composer' &&
+    !allToolMetadata((await store.getState()).config).some((item) => item.id === 'composer')
+
   const diskUsage = await store.diskUsage()
 
   return {
@@ -72,6 +122,15 @@ export async function runHarness(root: string, archive: string) {
     shimGenerated,
     mavenShimTargetsCmd,
     mavenShimCarriesJavaHome,
+    pharInstalled,
+    launcherUsesPhp,
+    composerDetected,
+    composerShimTargetsCmd,
+    pickedNew,
+    pickedOld,
+    pickedUnknown,
+    phpVersionParsed,
+    composerHidden,
     diskUsage
   }
 }

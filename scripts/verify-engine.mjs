@@ -50,6 +50,15 @@ const checks = [
   ['current/bin 垫片生成', result.shimGenerated],
   ['Maven 垫片指向 mvn.cmd', result.mavenShimTargetsCmd],
   ['Maven 垫片携带 JAVA_HOME', result.mavenShimCarriesJavaHome],
+  ['Composer phar 单文件落盘', result.pharInstalled],
+  ['Composer launcher 以 php 执行', result.launcherUsesPhp],
+  ['Composer 已安装版本可探测', result.composerDetected === 1],
+  ['Composer 垫片指向 composer.cmd', result.composerShimTargetsCmd],
+  ['新 PHP 选最新 Composer', result.pickedNew === '2.11.2'],
+  ['老 PHP 回退兼容 LTS', result.pickedOld === '2.2.32'],
+  ['未知 PHP 取最新版本', result.pickedUnknown === '2.11.2'],
+  ['PHP 版本号解析正确', result.phpVersionParsed],
+  ['Composer 不出现在用户工具列表', result.composerHidden],
   ['目录占用统计为正数', result.diskUsage > 0]
 ]
 

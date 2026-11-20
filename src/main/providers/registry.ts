@@ -5,9 +5,11 @@
  * 新增语言 = 实现一个 ToolProvider 并在 createProviders 里登记。
  */
 import type { AppConfig, ToolId, ToolProvider } from '@shared/domain'
+import { isUserVisibleTool } from '@shared/tools'
 import { JavaProvider } from './java'
 import { MavenProvider } from './maven'
 import { PhpProvider } from './php'
+import { ComposerProvider } from './composer'
 import { PythonProvider } from './python'
 import { GoProvider } from './go'
 import { NodeProvider } from './node'
@@ -21,6 +23,8 @@ export function createProviders(config: AppConfig): Map<ToolId, ToolProvider> {
   providers.set('java', new JavaProvider(config))
   providers.set('maven', new MavenProvider())
   providers.set('php', new PhpProvider(config))
+  // Composer 是 PHP 的内部附属工具，仅注册供引擎附带安装，不进入用户可见工具列表
+  providers.set('composer', new ComposerProvider())
   providers.set('python', new PythonProvider(config))
   providers.set('go', new GoProvider(config))
   providers.set('node', new NodeProvider(config))
@@ -29,9 +33,11 @@ export function createProviders(config: AppConfig): Map<ToolId, ToolProvider> {
 
 /** 全部工具元数据，由已登记的 provider 提供 */
 export function allToolMetadata(config: AppConfig): { id: ToolId; displayName: string; accent: string }[] {
-  return [...createProviders(config).values()].map((provider) => ({
-    id: provider.id,
-    displayName: provider.displayName,
-    accent: provider.accent
-  }))
+  return [...createProviders(config).values()]
+    .filter((provider) => isUserVisibleTool(provider.id))
+    .map((provider) => ({
+      id: provider.id,
+      displayName: provider.displayName,
+      accent: provider.accent
+    }))
 }

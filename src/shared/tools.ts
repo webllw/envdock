@@ -22,9 +22,27 @@ export const TOOL_METADATA: readonly ToolMeta[] = [
   { id: 'node', displayName: 'Node.js', accent: '#6cc24a' }
 ]
 
+/**
+ * 内部工具元数据。
+ *
+ * Composer 是 PHP 的附属构建工具，不出现在工具卡片、托盘与 IPC 用户入口；
+ * 它的展示信息只由 provider 内部使用，因此不放进 TOOL_METADATA。
+ */
+export const INTERNAL_TOOL_META = {
+  id: 'composer' as const,
+  displayName: 'Composer',
+  accent: '#a06cd5'
+}
+
 /** 取单个工具的展示元数据 */
 export function toolMeta(id: ToolId): ToolMeta {
+  if (id === INTERNAL_TOOL_META.id) return INTERNAL_TOOL_META
   return TOOL_METADATA.find((item) => item.id === id) ?? TOOL_METADATA[0]
+}
+
+/** 是否为用户可见工具；内部工具不纳入卡片、托盘与 IPC 入口 */
+export function isUserVisibleTool(id: ToolId): boolean {
+  return TOOL_METADATA.some((item) => item.id === id)
 }
 
 /**

@@ -20,6 +20,7 @@ import type {
   VersionInfo
 } from '@shared/domain'
 import { createProviders, allToolMetadata } from '@main/providers/registry'
+import { ComposerProvider } from '@main/providers/composer'
 import { removeVersionDir } from '@main/providers/runtime'
 import { currentBinRelative, writeActivationScripts, writeCurrentShims, type ActiveTool } from './activations'
 import { cachedFile, downloadAndVerify } from './downloader'
@@ -145,12 +146,14 @@ export class Engine {
    * 安装指定版本。
    *
    * Java 安装成功后自动附带一个 Maven：Maven 是 Java 项目的事实构建工具，
-   * 单独留出一步让用户再装不符合「装好 Java 即可开发」的预期。附带安装
-   * 只在尚未安装任何 Maven 时发生，且失败不回滚已完成的 Java 安装。
+   * 单独留出一步让用户再装不符合「装好 Java 即可开发」的预期。PHP 同理附带
+   * Composer，且按其最低 PHP 版本要求挑选兼容的版本。附带安装只在尚未安装
+   * 任何对应工具时发生，失败只告警、不回滚已完成的语言安装。
    */
   async install(toolId: ToolId, versionId: string): Promise<void> {
     await this.installVersion(toolId, versionId)
     if (toolId === 'java') await this.ensureMavenInstalled()
+    if (toolId === 'php') await this.ensureComposerInstalled(versionId)
   }
 
   /** 下载、校验并解压单个版本，进度事件直接使用工具与版本标识 */
@@ -221,6 +224,48 @@ export class Engine {
         phase: 'error',
         percent: -1,
         message: error instanceof Error ? error.message : '附带安装 Maven 失败'
+      })
+    }
+  }
+
+  /**
+   * 确保存在一个与当前 PHP 兼容的 Composer。
+   *
+   * Composer 按 PHP 附属工具管理：已装任意版本时跳过；否则从官方列表取满足
+   * 该 PHP 最低版本要求的最新版安装并激活。其 launcher 通过 PATH 里的 php
+   * 执行，因此切换 PHP 后 composer 命令自动跟随，无需重新附带。
+   */
+  private async ensureComposerInstalled(phpVersionId: string): Promise<void> {
+    const emit = this.emitProgress
+    try {
+      const installed = await this.detectTool('composer')
+      if (installed.length > 0) return
+
+      const provider = this.providers().get('composer')
+      if (!(provider instanceof ComposerProvider)) throw new Error('Composer provider 未注册')
+
+      const version = await provider.resolveForPhp(phpVersionId)
+      if (!version) throw new Error('官方源暂无兼容当前 PHP 的 Composer 版本')
+
+      await this.installVersion('composer', version.id)
+      await this.store.updateState((draft) => {
+        draft.activeVersions.composer = version.id
+      })
+      emit({
+        toolId: 'composer',
+        versionId: version.id,
+        phase: 'done',
+        percent: 100,
+        message: `已附带安装 Composer ${version.display}`
+      })
+    } catch (error) {
+      console.warn('[envdock] 附带安装 Composer 失败', error)
+      emit({
+        toolId: 'composer',
+        versionId: '',
+        phase: 'error',
+        percent: -1,
+        message: error instanceof Error ? error.message : '附带安装 Composer 失败'
       })
     }
   }

@@ -13,7 +13,9 @@ import type { Layout } from './paths'
 /**
  * 各工具需要进入 PATH 的可执行文件；用于 current/bin 稳定垫片。
  * 元素为「垫片名」与「版本目录内的目标文件名」二元组，默认目标为同名 .exe；
- * Maven 的 mvn 是 .cmd 脚本，需显式指定目标扩展名，避免垫片指向不存在的 exe。
+ * Maven 的 mvn 与 Composer 的 composer 都是 .cmd 脚本，需显式指定目标扩展名，
+ * 避免垫片指向不存在的 exe。Composer 的 launcher 内部以 php 解释 phar，
+ * php 从 PATH 解析（激活脚本或 current/bin 垫片），因此自动跟随当前 PHP。
  * Python 的 pythonw 是无控制台入口，pip 等 Scripts 下的脚本需先 ensurepip，不纳入垫片。
  */
 type ShimEntry = { name: string; target?: string }
@@ -21,6 +23,7 @@ const SHIMS: Record<ToolId, ShimEntry[]> = {
   java: [{ name: 'java' }, { name: 'javac' }, { name: 'jar' }],
   maven: [{ name: 'mvn', target: 'mvn.cmd' }],
   php: [{ name: 'php' }],
+  composer: [{ name: 'composer', target: 'composer.cmd' }],
   python: [{ name: 'python' }, { name: 'pythonw' }],
   go: [{ name: 'go' }, { name: 'gofmt' }],
   node: [{ name: 'node' }]

@@ -5,7 +5,7 @@
  * detectInstalled 依据这份元数据重建已安装列表，不依赖内存状态，
  * 因此应用重启或目录整体迁移后仍能正确识别。
  */
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -84,6 +84,25 @@ export async function extractZip(
     await writeFile(dest, entry.getData())
   }
 
+  await rm(targetDir, { recursive: true, force: true })
+  await rename(stagingDir, targetDir)
+}
+
+/**
+ * 安装单文件运行时（PHP phar 归档）。
+ *
+ * Composer 的官方发行物是一个 composer.phar，不需要解压。缓存文件名带版本，
+ * 落盘时统一改回 composer.phar，使各版本目录内路径一致、垫片可稳定引用。
+ */
+export async function installSingleFile(
+  archive: string,
+  targetDir: string,
+  fileName: string
+): Promise<void> {
+  const stagingDir = `${targetDir}.staging`
+  await rm(stagingDir, { recursive: true, force: true })
+  await mkdir(stagingDir, { recursive: true })
+  await copyFile(archive, join(stagingDir, fileName))
   await rm(targetDir, { recursive: true, force: true })
   await rename(stagingDir, targetDir)
 }

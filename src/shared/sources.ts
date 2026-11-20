@@ -27,6 +27,10 @@ export const OFFICIAL_SOURCES: Partial<Record<ToolId, OfficialSource>> = {
     label: 'windows.php.net 官方',
     url: 'https://windows.php.net/downloads/releases'
   },
+  composer: {
+    label: 'getcomposer.org 官方',
+    url: 'https://getcomposer.org'
+  },
   python: {
     label: 'Python.org 官方',
     url: 'https://www.python.org/downloads/windows'
