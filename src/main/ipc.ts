@@ -93,6 +93,7 @@ export function registerIpc(engine: Engine, windows: WindowActions): void {
 
   ipcMain.handle(IPC_CHANNELS.checkUpdate, async () => engine.checkUpdate())
   ipcMain.handle(IPC_CHANNELS.applyUpdate, async () => engine.upgrade())
+  ipcMain.handle(IPC_CHANNELS.clearUpdateResidue, async () => engine.clearUpdateResidue())
   ipcMain.handle(IPC_CHANNELS.getUpdateState, async () => engine.getUpdateState())
   ipcMain.handle(IPC_CHANNELS.checkProxy, async (_event, url: unknown, enabled: unknown) => {
     if (typeof url !== 'string' || typeof enabled !== 'boolean') throw new Error('代理探测参数不合法')

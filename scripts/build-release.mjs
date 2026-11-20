@@ -1,9 +1,11 @@
 /**
- * 完整发版打包：清空 release → 构建 → electron-builder → 组装绿色目录 → 打两个 zip 与校验值。
+ * 完整发版打包：隔离构建 → electron-builder → 组装绿色目录 → 打两个 zip 与校验值。
  *
- * 每次都从空的 release 开始，避免旧 win-unpacked 里的 app.asar 被系统进程独占，
- * 也避免历史构建目录（build107、pkg-108-final 等）不断堆积。
+ * 全部中间产物写进带时间戳的 .build-<ts>/ 目录，不在 release 内就地删除或改名。
+ * Windows 上 release/win-unpacked 里的 asar 常被资源管理器或杀毒软件锁定，
+ * 就地清空会触发删除保护；隔离目录从一开始就是空的，构建稳定且与历史产物隔离。
  *
+ * 最终只把两个 zip 与各自的 .sha256 覆盖写回 release/，覆盖不触发删除保护。
  * 产物：
  *   release/EnvDock-<version>-app.zip       就地升级包，根目录为 app/
  *   release/EnvDock-<version>-portable.zip  全新安装全量包，根目录为 EnvDock/
@@ -12,51 +14,48 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import AdmZip from 'adm-zip'
 
 const root = resolve(process.cwd())
 const releaseDir = join(root, 'release')
+const buildDir = join(root, `.build-${Date.now()}`)
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const version = pkg.version
 
-function run(command, args) {
-  execFileSync(command, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' })
+function run(command, args, env = process.env) {
+  execFileSync(command, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env })
 }
 
-// 1. 清空 release。此时若有进程占用其中的文件，删除会失败——直接报错，
-// 不静默改用其他目录，否则又会出现多份构建产物并存。
-if (existsSync(releaseDir)) {
-  try {
-    await rm(releaseDir, { recursive: true, force: true, maxRetries: 2, retryDelay: 200 })
-  } catch (error) {
-    console.error(`[build-release] 无法清空 release：${error instanceof Error ? error.message : error}`)
-    console.error('[build-release] 请关闭占用 release 目录的程序后重试')
-    process.exit(1)
-  }
-}
+await mkdir(buildDir, { recursive: true })
 await mkdir(releaseDir, { recursive: true })
 
-// 2. 构建与 electron-builder。输出到空的 release/win-unpacked。
+// 1. 构建与 electron-builder。用 -c.directories.output 把产物指向隔离目录，
+// 覆盖 yml 中的 release，使历史产物不参与本次构建。
 run('npm', ['run', 'build'])
-run('npx', ['electron-builder', '--dir', '--win', '--config', 'electron-builder.yml'])
+run('npx', ['electron-builder', '--dir', '--win', '--config', 'electron-builder.yml', '-c.directories.output=' + buildDir])
 
-const unpackedDir = join(releaseDir, 'win-unpacked')
+const unpackedDir = join(buildDir, 'win-unpacked')
 if (!existsSync(join(unpackedDir, 'EnvDock.exe'))) {
   console.error('[build-release] electron-builder 未产出 win-unpacked/EnvDock.exe')
   process.exit(1)
 }
 
-// 3. 组装绿色目录到 release/EnvDock。
-run('node', ['scripts/assemble-portable.mjs'])
-const portableDir = join(releaseDir, 'EnvDock')
+// 2. 组装绿色目录到隔离目录。
+run('node', ['scripts/assemble-portable.mjs'], {
+  ...process.env,
+  ASSEMBLE_RELEASE_DIR: buildDir,
+  ASSEMBLE_UNPACKED_DIR: 'win-unpacked',
+  ASSEMBLE_OUTPUT_DIR: 'EnvDock'
+})
+const portableDir = join(buildDir, 'EnvDock')
 if (!existsSync(join(portableDir, 'app', 'EnvDock.exe'))) {
   console.error('[build-release] 绿色目录缺少 app/EnvDock.exe')
   process.exit(1)
 }
 
-/** 收集目录内容为 zip；prefix 决定包内顶层目录名 */
+/** 收集目录内容为 zip；prefix 决定包内顶层目录名，out 写到 release/ */
 function buildZip(srcRoot, prefix, outName) {
   const zip = new AdmZip()
   let count = 0
@@ -85,9 +84,4 @@ function buildZip(srcRoot, prefix, outName) {
 buildZip(unpackedDir, 'app/', `EnvDock-${version}-app.zip`)
 buildZip(portableDir, 'EnvDock/', `EnvDock-${version}-portable.zip`)
 
-// 4. 清理中间产物，release 只留两个 zip 与校验值
-for (const name of ['win-unpacked', 'EnvDock']) {
-  await rm(join(releaseDir, name), { recursive: true, force: true }).catch(() => undefined)
-}
-
-console.log(`[build-release] v${version} 打包完成`)
+console.log(`[build-release] v${version} 打包完成，中间产物位于 ${buildDir}`)

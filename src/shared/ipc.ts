@@ -7,6 +7,7 @@
 import type {
   AppStateData,
   BootstrapPayload,
+  ClearResidueResult,
   HealthCheckItem,
   Manifest,
   ProgressEvent,
@@ -33,6 +34,7 @@ export const IPC_CHANNELS = {
   progress: 'envdock:progress',
   checkUpdate: 'envdock:check-update',
   applyUpdate: 'envdock:apply-update',
+  clearUpdateResidue: 'envdock:clear-update-residue',
   getUpdateState: 'envdock:get-update-state',
   setUpdSource: 'envdock:set-update-source',
   checkProxy: 'envdock:check-proxy',
@@ -99,6 +101,8 @@ export interface EnvdockApi {
   checkUpdate(): Promise<UpdateManifest | null>
   /** 下载并准备升级包，返回后由界面提示用户确认重启 */
   applyUpdate(): Promise<UpdateState>
+  /** 清除历史归档、升级包缓存与暂存残留，返回实际回收量 */
+  clearUpdateResidue(): Promise<ClearResidueResult>
   getUpdateState(): Promise<UpdateState>
   setUpdSource(req: SetUpdateSourceRequest): Promise<AppStateData>
   /** 用给定代理实测官方列表接口的连通性；enabled 为 false 时测直连 */

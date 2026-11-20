@@ -73,6 +73,11 @@ export class Engine {
     return this.updater.apply()
   }
 
+  /** 清除升级历史归档、升级包缓存与暂存残留 */
+  async clearUpdateResidue(): Promise<import('@shared/domain').ClearResidueResult> {
+    return this.updater.clearUpdateResidue()
+  }
+
   getUpdateState(): UpdateState {
     return this.updater.state()
   }

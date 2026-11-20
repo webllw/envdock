@@ -17,7 +17,7 @@ import type { Dirent } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import type { AppHistoryEntry, UpdateManifest, UpdateState, VersionState } from '@shared/domain'
+import type { AppHistoryEntry, ClearResidueResult, UpdateManifest, UpdateState, VersionState } from '@shared/domain'
 import { downloadBytes, verifyChecksum } from './downloader'
 import { fetchLatestRelease } from './github-release'
 import type { Layout } from './paths'
@@ -769,6 +769,76 @@ export class Updater {
     this.history = []
     await cleanupDiscardResidue(archiveDir)
     await cleanupDiscardResidue(downloadDir)
+  }
+
+  /**
+   * 手动清除全部升级残留，供用户在设置页主动释放磁盘并复位升级状态。
+   *
+   * 与 cleanupSuperseded 的区别：后者只在升级确认成功时静默执行，本方法由用户
+   * 显式触发，覆盖更广——除归档与升级包外，还包括 staging、error.flag、
+   * confirmed 以及两处目录下改名待清理的 .discard 残留。当前运行的 app/ 不在
+   * 清理范围内，因此不会影响正在使用的版本。逐项独立处理并统计回收量，占用
+   * 导致改名兜底的路径计入 pendingDiscard，如实告知用户需重启后手动删除。
+   */
+  async clearUpdateResidue(): Promise<ClearResidueResult> {
+    const result: ClearResidueResult = { removedCount: 0, reclaimedBytes: 0, pendingDiscard: 0 }
+    const archiveDir = this.options.layout.updateHistoryDir
+    const downloadDir = this.options.layout.updateDownloadDir
+
+    const readDirs = async (dir: string): Promise<string[]> => {
+      try {
+        return (await readdir(dir, { withFileTypes: true })).map((entry) => entry.name)
+      } catch {
+        return []
+      }
+    }
+
+    // history 下每个条目都是归档目录（含上次删净失败的 .discard-*）
+    for (const name of await readDirs(archiveDir)) {
+      const full = join(archiveDir, name)
+      result.reclaimedBytes += await directorySize(full)
+      if (name.includes('.discard-')) {
+        const done = await rm(full, { recursive: true, force: true, maxRetries: 1, retryDelay: 60 })
+          .then(() => true, () => false)
+        if (done) result.removedCount += 1
+        else result.pendingDiscard += 1
+        continue
+      }
+      const removed = await removeDirectoryRobust(full)
+      if (removed.residue) result.pendingDiscard += 1
+      else result.removedCount += 1
+    }
+
+    // download 下是升级包文件与下载中的 .part，以及可能的 .discard-* 目录
+    for (const name of await readDirs(downloadDir)) {
+      const full = join(downloadDir, name)
+      const isDir = await stat(full).then((s) => s.isDirectory(), () => false)
+      result.reclaimedBytes += isDir ? await directorySize(full) : await stat(full).then((s) => s.size, () => 0)
+      const done = await rm(full, { recursive: isDir, force: true, maxRetries: 1, retryDelay: 60 })
+        .then(() => true, () => false)
+      if (done) result.removedCount += 1
+      else result.pendingDiscard += 1
+    }
+
+    // staging 是解压暂存目录，同样走健壮删除
+    const staging = this.options.layout.updateStagingDir
+    if (existsSync(staging)) {
+      result.reclaimedBytes += await directorySize(staging)
+      const removed = await removeDirectoryRobust(staging)
+      if (removed.residue) result.pendingDiscard += 1
+      else result.removedCount += 1
+    }
+
+    // 标记文件极小，计入数量但不影响回收量统计
+    for (const flagPath of [join(this.options.layout.updatesDir, 'error.flag'), this.options.layout.updateConfirmFile]) {
+      if (!existsSync(flagPath)) continue
+      if (await rm(flagPath, { force: true }).then(() => true, () => false)) result.removedCount += 1
+    }
+
+    this.history = []
+    this.publish({ canRollback: false, readyToApply: false, available: null, phase: 'idle', percent: 0, message: '' })
+    await this.loadHistory()
+    return result
   }
 
   /** 启动确认。新版本首次启动时调用：版本匹配则写确认文件并清空挂起状态 */

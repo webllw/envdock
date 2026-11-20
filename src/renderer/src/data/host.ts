@@ -44,6 +44,7 @@ export const api = {
   openTerminal: () => requireHost().openTerminal(),
   checkUpdate: (): Promise<UpdateManifest | null> => requireHost().checkUpdate(),
   applyUpdate: (): Promise<UpdateState> => requireHost().applyUpdate(),
+  clearUpdateResidue: (): Promise<import('@shared/domain').ClearResidueResult> => requireHost().clearUpdateResidue(),
   getUpdateState: (): Promise<UpdateState> => requireHost().getUpdateState(),
   setUpdSource: (sourceUrl: string, autoCheck: boolean) =>
     requireHost().setUpdSource({ sourceUrl, autoCheck }),

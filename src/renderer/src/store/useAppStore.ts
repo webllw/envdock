@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   AppConfig,
+  ClearResidueResult,
   HealthCheckItem,
   Manifest,
   ProgressEvent,
@@ -87,6 +88,7 @@ interface AppState {
   uninstallAll: () => Promise<void>
   checkUpdate: (silent?: boolean) => Promise<UpdateManifest | null>
   applyUpdate: () => Promise<void>
+  clearUpdateResidue: () => Promise<ClearResidueResult | null>
   setUpdSource: (sourceUrl: string, autoCheck: boolean) => Promise<void>
   loadUpdateState: () => Promise<void>
   setUpdateState: (state: UpdateState) => void
@@ -372,6 +374,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showToast('升级包已就绪，应用即将重启', 'success')
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '升级失败', 'warning')
+    }
+  },
+
+  clearUpdateResidue: async () => {
+    try {
+      const result = await api.clearUpdateResidue()
+      await get().loadUpdateState()
+      const released = (result.reclaimedBytes / 1024 / 1024).toFixed(1)
+      const suffix = result.pendingDiscard > 0 ? `，${result.pendingDiscard} 项占用需重启后清理` : ''
+      get().showToast(
+        result.removedCount > 0
+          ? `已清除 ${result.removedCount} 项升级残留，释放 ${released} MB${suffix}`
+          : `没有需要清理的升级残留${suffix}`,
+        'success'
+      )
+      return result
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : '清除升级残留失败', 'warning')
+      return null
     }
   },
 

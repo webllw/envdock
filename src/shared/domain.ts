@@ -209,6 +209,16 @@ export interface UpdateState {
   percent: number
 }
 
+/** 清除升级残留的结果，供界面反馈实际释放量 */
+export interface ClearResidueResult {
+  /** 已删除的归档目录与升级包数量 */
+  removedCount: number
+  /** 累计回收的字节数 */
+  reclaimedBytes: number
+  /** 未能删除且已改名待重启清理的目录数量 */
+  pendingDiscard: number
+}
+
 /** 网络代理配置；url 为 HTTP 代理地址，如 http://127.0.0.1:7890 */
 export interface ProxyConfig {
   enabled: boolean

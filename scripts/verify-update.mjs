@@ -117,7 +117,10 @@ const checks = [
   ['删除指定历史版本且保护当前版本', result.discardOk],
   ['仅升级包版本可还原后回退', result.packageRollbackOk],
   ['删除同时清理归档与升级包', result.packageDiscardOk],
-  ['旧 app.old 迁移为历史归档', result.legacyMigrated]
+  ['旧 app.old 迁移为历史归档', result.legacyMigrated],
+  ['手动清除全部升级残留', result.residueCleared],
+  ['清除结果如实统计回收量', result.clearResultOk],
+  ['清除后升级状态复位', result.clearStateOk]
 ]
 
 let failed = 0

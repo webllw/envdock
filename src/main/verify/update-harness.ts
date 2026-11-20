@@ -1,6 +1,6 @@
 /** 升级逻辑验证入口，不参与应用构建 */
 import { join } from 'node:path'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout } from '@main/core/paths'
 import { Store, migrateState, migrateVersionState } from '@main/core/store'
 import { Updater, compareVersions, buildReplaceScript, buildSilentLauncher, isValidVersionDir, APP_EXE_NAME, VERSION_MARKER } from '@main/core/updater'
@@ -286,6 +286,41 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
   const legacyMigrated = await stat(join(layout.updateHistoryDir, '0.0.8', APP_EXE_NAME))
     .then(() => true, () => false) && await stat(legacy).then(() => false, () => true)
 
+  // 14. 手动清除全部升级残留：额外造出 staging、错误标记、确认标记与 .discard
+  // 残留，调用后各目录必须清空、状态复位，并如实统计回收量。
+  await mkdir(join(layout.updateStagingDir, 'resources'), { recursive: true })
+  await writeFile(join(layout.updateStagingDir, APP_EXE_NAME), 'staged-exe')
+  await writeFile(join(layout.updateStagingDir, 'resources', 'app.asar'), 'staged-asar')
+  await writeFile(join(layout.updatesDir, 'error.flag'), '升级未完成，已恢复原版本')
+  await writeFile(layout.updateConfirmFile, '0.2.0')
+  await mkdir(join(layout.updateHistoryDir, '1.0.0.discard-123'), { recursive: true })
+  await writeFile(join(layout.updateHistoryDir, '1.0.0.discard-123', APP_EXE_NAME), 'discard-exe')
+  const clearer = new Updater({
+    layout,
+    store: newStore,
+    appVersion: '0.2.0',
+    emit: () => undefined,
+    restart: () => undefined,
+    launchScript: () => undefined
+  })
+  const cleared = await clearer.clearUpdateResidue()
+  const listAfterClear = async (dir: string): Promise<string[]> => {
+    try {
+      return await readdir(dir)
+    } catch {
+      return []
+    }
+  }
+  const residueCleared = (await listAfterClear(layout.updateHistoryDir)).length === 0 &&
+    (await listAfterClear(layout.updateDownloadDir)).length === 0 &&
+    await stat(layout.updateStagingDir).then(() => false, () => true) &&
+    await stat(join(layout.updatesDir, 'error.flag')).then(() => false, () => true) &&
+    await stat(layout.updateConfirmFile).then(() => false, () => true)
+  const clearResultOk = cleared.removedCount > 0 && cleared.reclaimedBytes > 0 &&
+    cleared.pendingDiscard === 0
+  const clearStateOk = clearer.state().history.length === 0 && clearer.state().canRollback === false &&
+    clearer.state().readyToApply === false
+
   return {
     migrationKeepsConfig,
     migrationFillsUpdate,
@@ -318,6 +353,9 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     packageRollbackOk,
     packageDiscardOk,
     legacyMigrated,
+    residueCleared,
+    clearResultOk,
+    clearStateOk,
     phases: events
   }
 }
