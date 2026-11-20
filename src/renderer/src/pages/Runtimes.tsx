@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Check, Trash2, Globe2, Loader2 } from 'lucide-react'
+import { Plus, Check, Trash2, Globe2, Loader2, Info } from 'lucide-react'
 import { useAppStore } from '@renderer/store/useAppStore'
 import { Button, Card, StatusDot, Tag, EmptyState } from '@renderer/components/ui/ui'
 import type { InstalledVersion, ToolId } from '@renderer/types/domain'
@@ -106,6 +106,16 @@ export function Runtimes() {
           <Plus size={14} /> 安装版本
         </Button>
       </div>
+
+      {selected.id === 'node' && (
+        <div className="runtime-notice">
+          <Info size={14} className="runtime-notice-icon" />
+          <span>
+            npm 全局目录固定在 <code>global/npm</code>，按 Node 主版本隔离，由 EnvDock 自动管理。
+            请勿手动改动该目录或另行设置 npm prefix / cache，否则切换版本后全局命令可能失效。
+          </span>
+        </div>
+      )}
 
       <div className="section-head">
         <h2>已安装版本</h2>

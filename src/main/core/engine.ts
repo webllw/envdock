@@ -26,7 +26,8 @@ import { removeVersionDir } from '@main/providers/runtime'
 import { currentBinRelative, writeActivationScripts, writeCurrentShims, type ActiveTool } from './activations'
 import { cachedFile, downloadAndVerify } from './downloader'
 import { addPathEntry, hasPathEntry, removePathEntry, rollbackMutation } from './system'
-import { createLayout, npmGlobalDir, normalizeNpmGlobalDir, type Layout } from './paths'
+import { createLayout, npmGlobalDir, type Layout } from './paths'
+import { syncNpmGlobalTarget } from './npm-globals'
 import { setProxyProvider, testProxyConnection } from './net'
 import type { ProxyTestResult } from '@shared/ipc'
 import { Store } from './store'
@@ -54,22 +55,23 @@ export class Engine {
     await this.store.init()
     // 网络层按需读取实时配置，配置变更无需重新注入；此处只建立一次性绑定
     setProxyProvider(() => this.store.getState().config.proxy)
-    await this.ensureNpmGlobalDirs(this.store.getState().config.npmGlobalDir)
+    await this.ensureNpmGlobalDirs()
+    // 旧版本升级时 PATH 集成已开启，但当时还没有 npm 全局目录这一条；
+    // 每次启动补齐缺失条目，让 npm i -g 生成的 pnpm 等命令对新终端可见。
+    if (this.store.getState().config.pathIntegration) await this.setPathIntegration(true)
     await this.refreshActivationArtifacts()
     await this.updater.init()
     await this.updater.confirmOnStartup()
   }
 
-  /** 由配置的相对路径得到 npm 全局前缀的绝对路径 */
+  /** npm 全局前缀的绝对路径，固定为环境根目录下的 global/npm */
   private npmGlobalEntry(): string {
-    return npmGlobalDir(this.layout.root, this.store.getState().config.npmGlobalDir)
+    return npmGlobalDir(this.layout.root)
   }
 
-  /** 预先创建全局前缀与缓存目录，避免首次 npm i -g 时落回默认位置 */
-  private async ensureNpmGlobalDirs(configured: string): Promise<void> {
-    const prefix = npmGlobalDir(this.layout.root, configured)
-    await mkdir(prefix, { recursive: true })
-    await mkdir(join(prefix, 'cache'), { recursive: true })
+  /** 把 npm 全局入口指向当前 Node 主版本对应的仓库 */
+  private async ensureNpmGlobalDirs(): Promise<void> {
+    await syncNpmGlobalTarget(this.layout.root, this.store.getState().activeVersions.node ?? null)
   }
 
   /** 用给定代理实测官方列表接口；地址非法或不可达时抛错由界面提示 */
@@ -292,6 +294,7 @@ export class Engine {
     await this.store.updateState((draft) => {
       draft.activeVersions[toolId] = versionId
     })
+    if (toolId === 'node') await this.ensureNpmGlobalDirs()
     await this.refreshActivationArtifacts()
   }
 
@@ -371,33 +374,9 @@ export class Engine {
   }
 
   async setConfig(patch: Partial<AppStateData['config']>): Promise<AppStateData> {
-    if (patch.npmGlobalDir !== undefined) {
-      // 非法目录在此抛错，由界面提示；不把脏路径写进状态
-      patch = { ...patch, npmGlobalDir: normalizeNpmGlobalDir(patch.npmGlobalDir) }
-    }
-    const previousDir = this.store.getState().config.npmGlobalDir
-    const state = await this.store.updateState((draft) => {
+    return this.store.updateState((draft) => {
       draft.config = { ...draft.config, ...patch }
     })
-
-    if (patch.npmGlobalDir !== undefined && patch.npmGlobalDir !== previousDir) {
-      const oldEntry = npmGlobalDir(this.layout.root, previousDir)
-      const newEntry = npmGlobalDir(this.layout.root, patch.npmGlobalDir)
-      await this.ensureNpmGlobalDirs(patch.npmGlobalDir)
-      if (state.config.pathIntegration && !(await hasPathEntry(newEntry))) {
-        // 旧条目留着不影响功能，但会占 PATH；移除后再写新条目，各自独立可回滚
-        await removePathEntry(oldEntry)
-        const mutation = await addPathEntry(newEntry)
-        if (mutation) {
-          await this.store.updateManifest((draft) => {
-            draft.mutations.push(mutation)
-          })
-        }
-      }
-      // npm_config_prefix 注入在激活计划里，改目录后必须重建垫片与脚本
-      await this.refreshActivationArtifacts()
-    }
-    return state
   }
 
   /** PATH 集成开关：写入或移除 current/bin 与 npm 全局目录，并记录可回滚变更 */
@@ -449,16 +428,14 @@ export class Engine {
     if (oldRoot === targetRoot) throw new Error('目标目录与当前目录相同')
 
     const oldBinEntry = join(oldRoot, currentBinRelative())
-    const oldNpmEntry = npmGlobalDir(oldRoot, this.store.getState().config.npmGlobalDir)
+    const oldNpmEntry = npmGlobalDir(oldRoot)
     for (const entry of [oldBinEntry, oldNpmEntry]) {
       if (await hasPathEntry(entry)) await removePathEntry(entry)
     }
 
     await mkdir(targetRoot, { recursive: true })
-    // npm 全局目录的首段可能是自定义名称，按配置推导后并入固定清单一起迁移
-    const npmTop = normalizeNpmGlobalDir(this.store.getState().config.npmGlobalDir).split('/')[0]
-    const moveNames = ['runtimes', 'cache', 'scripts', 'current', 'state.json', 'manifest.json']
-    if (!moveNames.includes(npmTop)) moveNames.push(npmTop)
+    // global 同时容纳 npm 入口与版本仓库，并入固定清单一起迁移
+    const moveNames = ['runtimes', 'cache', 'scripts', 'current', 'global', 'state.json', 'manifest.json']
     for (const name of moveNames) {
       const from = join(oldRoot, name)
       const to = join(targetRoot, name)
@@ -471,6 +448,9 @@ export class Engine {
     const newLayout = createLayout(targetRoot)
     await this.store.adoptLayout(newLayout)
     this.layout = newLayout
+
+    // junction 的目标仍是迁移前的绝对路径，迁完目录后按新根目录重建
+    await this.ensureNpmGlobalDirs()
 
     // 清单里的路径是迁移前写入的，按新根目录重写后落盘
     const manifest = await this.store.updateManifest((draft) => {
@@ -485,7 +465,7 @@ export class Engine {
     // 若此前开启了 PATH 集成，撤销旧条目并在新位置重新写入
     if (this.store.getState().config.pathIntegration) {
       await addPathEntry(join(targetRoot, currentBinRelative()))
-      await addPathEntry(npmGlobalDir(targetRoot, this.store.getState().config.npmGlobalDir))
+      await addPathEntry(npmGlobalDir(targetRoot))
     }
     return manifest
   }

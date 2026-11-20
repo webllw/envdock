@@ -59,17 +59,15 @@ const checks = [
   ['未知 PHP 取最新版本', result.pickedUnknown === '2.11.2'],
   ['PHP 版本号解析正确', result.phpVersionParsed],
   ['Composer 不出现在用户工具列表', result.composerHidden],
-  ['npm 全局目录默认值为 global/npm', result.npmDefault],
-  ['旧配置迁移补齐 npm 全局目录', result.npmMigratedDefault],
-  ['npm 全局目录拒绝绝对路径', result.npmAbsoluteRejected],
-  ['npm 全局目录拒绝 .. 穿越', result.npmTraversalRejected],
-  ['npm 全局目录规范化为相对路径', result.npmNormalized],
+  ['npm 全局目录固定且不可配置', result.npmFixed],
   ['npm 全局前缀与缓存不含版本号', result.npmPrefixStable],
   ['node 垫片携带 npm_config_prefix', result.nodeShimCarriesPrefix],
   ['npm 垫片指向 npm.cmd', result.npmCmdShimTargetsCmd],
   ['npx 垫片指向 npx.cmd', result.npxCmdShimTargetsCmd],
   ['npm 垫片携带 npm_config_prefix', result.npmCmdShimCarriesPrefix],
   ['激活脚本按根目录展开 npm 前缀', result.npmScriptCarriesPrefix],
+  ['npm 全局目录随 Node 主版本切换', result.globalDirFollowsNode],
+  ['已安装版本按版本号降序排列', result.installedSortedNewestFirst],
   ['目录占用统计为正数', result.diskUsage > 0]
 ]
 

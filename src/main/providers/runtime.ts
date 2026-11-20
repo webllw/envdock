@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import type { InstalledVersion, ToolId, VersionInfo } from '@shared/domain'
+import { compareVersionIds } from './common'
 
 const METADATA_FILE = '.envdock-version.json'
 
@@ -151,7 +152,10 @@ export async function detectInstalled(
     })
   }
 
-  return result.sort((a, b) => b.installedAt.localeCompare(a.installedAt))
+  // 已安装列表按版本号降序，安装时间只作为同版本重复目录的稳定次序
+  return result.sort((a, b) =>
+    compareVersionIds(b.versionId, a.versionId) || b.installedAt.localeCompare(a.installedAt)
+  )
 }
 
 /** 删除版本目录，损坏或不存在的目录按成功处理 */

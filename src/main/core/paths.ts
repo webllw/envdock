@@ -106,25 +106,15 @@ export function normalizeTargetRoot(target: string): string {
   return resolve(target)
 }
 
-/** npm 全局目录默认值：位于环境根目录下，不随版本切换变化 */
-export const DEFAULT_NPM_GLOBAL_DIR = 'global/npm'
-
 /**
- * 规范化 npm 全局目录的相对路径。
+ * npm 全局目录固定为环境根目录下的 global/npm，不提供配置入口。
  *
- * 只接受环境根目录内的相对路径，盘符开头、UNC 路径和向上穿越都拒绝，
- * 避免把全局包写到根目录之外导致目录不可迁移。空值回退到默认目录。
+ * 固定路径让 PATH、垫片和 junction 指针都以同一个入口为准，
+ * 用户无需也不能改动，避免全局包写到根目录之外导致目录不可迁移。
  */
-export function normalizeNpmGlobalDir(value: string): string {
-  const trimmed = value.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-  if (!trimmed) return DEFAULT_NPM_GLOBAL_DIR
-  if (/^[A-Za-z]:/.test(trimmed) || trimmed.split('/').includes('..')) {
-    throw new Error('npm 全局目录必须是环境根目录内的相对路径，不能使用盘符或 ..')
-  }
-  return trimmed
-}
+export const NPM_GLOBAL_DIR = 'global/npm'
 
-/** 由根目录与配置的相对路径解析出 npm 全局目录的绝对路径 */
-export function npmGlobalDir(root: string, relative: string): string {
-  return join(resolve(root), normalizeNpmGlobalDir(relative))
+/** 由根目录解析出 npm 全局目录入口的绝对路径 */
+export function npmGlobalDir(root: string): string {
+  return join(resolve(root), NPM_GLOBAL_DIR)
 }

@@ -87,6 +87,30 @@
 
 .section-note { font-size: 11px; color: var(--text-tertiary); }
 
+/* Node 全局目录为固定值，红色提示用户不要自行改动，避免切换版本后命令失效 */
+.runtime-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--error);
+  background: var(--error-soft);
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius-md);
+}
+
+.runtime-notice-icon { flex: none; margin-top: 2px; }
+
+.runtime-notice code {
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--error-soft);
+  border: 1px solid var(--error-border);
+}
+
 .version-list {
   display: flex;
   flex-direction: column;

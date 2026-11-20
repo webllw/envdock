@@ -1,7 +1,8 @@
 /** 验证脚本用的引擎调用入口，不参与应用构建 */
 import { join } from 'node:path'
-import { readFile, stat, writeFile } from 'node:fs/promises'
-import { createLayout, normalizeNpmGlobalDir } from '@main/core/paths'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { createLayout, NPM_GLOBAL_DIR, npmGlobalDir } from '@main/core/paths'
+import { npmGlobalStoreDir, syncNpmGlobalTarget } from '@main/core/npm-globals'
 import { defaultConfig, migrateState, Store } from '@main/core/store'
 import { NodeProvider } from '@main/providers/node'
 import { detectInstalled, extractZip, installSingleFile, writeVersionMetadata } from '@main/providers/runtime'
@@ -110,29 +111,13 @@ export async function runHarness(root: string, archive: string) {
     INTERNAL_TOOL_META.id === 'composer' &&
     !allToolMetadata((await store.getState()).config).some((item) => item.id === 'composer')
 
-  // npm 全局目录：默认位于根目录下，旧配置缺字段时补默认，非法绝对路径被拒绝
-  const npmDefault = defaultConfig().npmGlobalDir === 'global/npm'
-  const npmMigratedDefault = migrateState({ config: { mirror: 'official' } })?.config.npmGlobalDir === 'global/npm'
-  const npmAbsoluteRejected = (() => {
-    try {
-      normalizeNpmGlobalDir('C:\\npm-global')
-      return false
-    } catch {
-      return true
-    }
-  })()
-  const npmTraversalRejected = (() => {
-    try {
-      normalizeNpmGlobalDir('global/../npm')
-      return false
-    } catch {
-      return true
-    }
-  })()
-  const npmNormalized = normalizeNpmGlobalDir('  tools\\npm  ') === 'tools/npm'
+  // npm 全局目录固定为 global/npm，且不再出现在可配置项中
+  const npmFixed = NPM_GLOBAL_DIR === 'global/npm' &&
+    !('npmGlobalDir' in defaultConfig()) &&
+    !('npmGlobalDir' in (migrateState({ config: { mirror: 'official' } })?.config ?? {}))
 
   // Node 激活计划注入的全局前缀与缓存都不含版本号，切换版本时保持不变
-  const nodeConfig = { ...defaultConfig(), npmGlobalDir: 'global/npm' }
+  const nodeConfig = defaultConfig()
   const nodePlan = new NodeProvider(nodeConfig).activate({
     id: 'v22.11.0', display: '22.11.0', channel: 'lts', releasedAt: ''
   })
@@ -159,6 +144,41 @@ export async function runHarness(root: string, archive: string) {
   const npmScriptCarriesPrefix = (await readFile(join(layout.scriptsDir, 'activate.ps1'), 'utf8'))
     .includes("$env:npm_config_prefix = Join-Path $envdockRoot 'global/npm'")
 
+  // 切换 Node 主版本时只重建全局入口指针，各版本的全局命令互不覆盖
+  const npmEntry = npmGlobalDir(root)
+  const npmStore = npmGlobalStoreDir(root)
+  const npmStore22 = join(npmStore, 'node22')
+  const npmStore20 = join(npmStore, 'node20')
+  await mkdir(npmStore22, { recursive: true })
+  await mkdir(npmStore20, { recursive: true })
+  await writeFile(join(npmStore22, 'pnpm.cmd'), 'node22', 'utf8')
+  await writeFile(join(npmStore20, 'pnpm.cmd'), 'node20', 'utf8')
+  const npmSwitched22 = await syncNpmGlobalTarget(root, 'v22.11.0')
+  const pnpmOn22 = await readFile(join(npmEntry, 'pnpm.cmd'), 'utf8')
+  const npmSwitched20 = await syncNpmGlobalTarget(root, 'v20.20.2')
+  const pnpmOn20 = await readFile(join(npmEntry, 'pnpm.cmd'), 'utf8')
+  const globalDirFollowsNode = npmSwitched22.changed && npmSwitched20.changed &&
+    pnpmOn22 === 'node22' && pnpmOn20 === 'node20'
+
+  // 已安装列表按版本号降序；故意让旧版本的安装时间更新，确保排序不依赖安装时间
+  const nodeRuntimes = join(layout.runtimesDir, 'node')
+  const installedFixtures = [
+    { id: 'v20.20.2', installedAt: '2026-03-04T00:00:00.000Z' },
+    { id: 'v26.13.1', installedAt: '2026-01-02T00:00:00.000Z' },
+    { id: 'v24.22.3', installedAt: '2026-01-01T00:00:00.000Z' }
+  ]
+  for (const item of installedFixtures) {
+    const dir = join(nodeRuntimes, item.id)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, '.envdock-version.json'), JSON.stringify({
+      versionId: item.id,
+      display: item.id.slice(1),
+      installedAt: item.installedAt
+    }), 'utf8')
+  }
+  const installedOrder = (await detectInstalled(root, 'node')).map((item) => item.versionId).join(',')
+  const installedSortedNewestFirst = installedOrder === 'v26.13.1,v24.22.3,v20.20.2'
+
   const diskUsage = await store.diskUsage()
 
   return {
@@ -181,17 +201,15 @@ export async function runHarness(root: string, archive: string) {
     pickedUnknown,
     phpVersionParsed,
     composerHidden,
-    npmDefault,
-    npmMigratedDefault,
-    npmAbsoluteRejected,
-    npmTraversalRejected,
-    npmNormalized,
+    npmFixed,
     npmPrefixStable,
     nodeShimCarriesPrefix,
     npmCmdShimTargetsCmd,
     npxCmdShimTargetsCmd,
     npmCmdShimCarriesPrefix,
     npmScriptCarriesPrefix,
+    globalDirFollowsNode,
+    installedSortedNewestFirst,
     diskUsage
   }
 }

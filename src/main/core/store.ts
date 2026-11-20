@@ -11,7 +11,7 @@ import { mkdir, readFile, rename, writeFile, stat, readdir } from 'node:fs/promi
 import { dirname, join } from 'node:path'
 import type { AppConfig, AppStateData, Manifest, VersionState } from '@shared/domain'
 import { DEFAULT_UPDATE_REPO, parseRepoSlug } from '@shared/sources'
-import { DEFAULT_NPM_GLOBAL_DIR, normalizeNpmGlobalDir, type Layout } from './paths'
+import type { Layout } from './paths'
 
 const STATE_SCHEMA_VERSION = 3
 const MANIFEST_SCHEMA_VERSION = 1
@@ -62,7 +62,6 @@ export function defaultConfig(): AppConfig {
   return {
     mirror: 'official',
     pathIntegration: false,
-    npmGlobalDir: DEFAULT_NPM_GLOBAL_DIR,
     update: defaultUpdateConfig(),
     proxy: defaultProxyConfig(),
     closeBehavior: 'ask'
@@ -109,14 +108,6 @@ export function migrateState(raw: unknown, now = new Date().toISOString()): AppS
         ? mirror
         : 'official',
       pathIntegration: bool(config.pathIntegration, false),
-      // 旧配置无此字段；磁盘上的非法值回退默认，避免升级后全局目录指向根目录之外
-      npmGlobalDir: (() => {
-        try {
-          return normalizeNpmGlobalDir(str(config.npmGlobalDir, DEFAULT_NPM_GLOBAL_DIR))
-        } catch {
-          return DEFAULT_NPM_GLOBAL_DIR
-        }
-      })(),
       update: {
         sourceUrl,
         autoCheck: bool(update.autoCheck, true)
