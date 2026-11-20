@@ -285,13 +285,15 @@ export function buildReplaceScript(params: {
   return lines.join('\r\n') + '\r\n'
 }
 
-/** 把升级包解压到 staging；升级包内容是 app 目录的直接内容 */
-async function extractToStaging(archive: string, stagingDir: string): Promise<void> {
-  await rm(stagingDir, { recursive: true, force: true })
-  await mkdir(stagingDir, { recursive: true })
+/**
+ * 把升级包内容解压到目标目录。升级包根即 app 目录内容；部分打包工具会多包
+ * 一层 app/，统一剥离。路径做穿越校验，完成后校验主程序确实落盘。
+ */
+async function extractAppArchive(archive: string, targetDir: string): Promise<void> {
+  await rm(targetDir, { recursive: true, force: true })
+  await mkdir(targetDir, { recursive: true })
   const zip = new AdmZip(archive)
 
-  // 部分打包工具会把内容包一层 app/ 目录，统一剥离到 staging 根
   const entries = zip.getEntries().filter((entry) => !entry.isDirectory)
   if (entries.length === 0) throw new Error('升级包内没有文件')
   const allUnderApp = entries.every((entry) => {
@@ -306,13 +308,18 @@ async function extractToStaging(archive: string, stagingDir: string): Promise<vo
     }
     const relative = allUnderApp ? normalized.slice('app/'.length) : normalized
     if (!relative) continue
-    const destination = join(stagingDir, relative)
+    const destination = join(targetDir, relative)
     await mkdir(dirname(destination), { recursive: true })
     await writeFile(destination, entry.getData())
   }
 
-  const exePath = join(stagingDir, APP_EXE_NAME)
+  const exePath = join(targetDir, APP_EXE_NAME)
   if (!existsSync(exePath)) throw new Error(`升级包缺少 ${APP_EXE_NAME}`)
+}
+
+/** 把升级包解压到 staging；升级包内容是 app 目录的直接内容 */
+async function extractToStaging(archive: string, stagingDir: string): Promise<void> {
+  await extractAppArchive(archive, stagingDir)
 }
 
 export class Updater {
@@ -350,20 +357,30 @@ export class Updater {
     return this.options.store.getState().config.update.sourceUrl.trim().replace(/\/+$/, '')
   }
 
-  /** 扫描归档目录，按版本号降序刷新历史列表 */
+  /**
+   * 扫描历史版本并刷新列表，按版本号降序。
+   *
+   * 来源有两处，按版本号合并去重：updates/history/<version> 的完整 app 副本，
+   * 与 updates/download/EnvDock-<version>-app.zip 的升级包缓存。早期版本的
+   * 归档机制只保留单份 app.old，很多版本只留下升级包；把两处都纳入，才能列出
+   * 全部下载过的版本。升级包内容就是完整的 app 目录，同样可用于回退。
+   */
   async loadHistory(): Promise<AppHistoryEntry[]> {
-    const dir = this.options.layout.updateHistoryDir
-    let names: string[] = []
+    const archiveDir = this.options.layout.updateHistoryDir
+    const downloadDir = this.options.layout.updateDownloadDir
+    const byVersion = new Map<string, AppHistoryEntry>()
+
+    let archives: string[] = []
     try {
-      const entries = await readdir(dir, { withFileTypes: true })
-      names = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      const entries = await readdir(archiveDir, { withFileTypes: true })
+      archives = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
     } catch {
-      names = []
+      /* 目录尚未建立，按空列表处理 */
     }
-    const result: AppHistoryEntry[] = []
-    for (const name of names) {
+
+    for (const name of archives) {
       if (!isValidVersionDir(name)) continue
-      const full = join(dir, name)
+      const full = join(archiveDir, name)
       let archivedAt = new Date(0).toISOString()
       let sizeBytes = 0
       try {
@@ -372,13 +389,62 @@ export class Updater {
         /* 目录在扫描期间被删除，保留默认值 */
       }
       sizeBytes = await directorySize(full)
-      result.push({
+      byVersion.set(name, {
         version: name,
         archivedAt,
         sizeBytes,
-        launchable: existsSync(join(full, APP_EXE_NAME))
+        launchable: existsSync(join(full, APP_EXE_NAME)),
+        source: 'archive'
       })
     }
+
+    // 升级包文件名形如 EnvDock-1.0.6-app.zip；只认已完成文件，跳过 .part 临时件
+    const packagePattern = /^EnvDock-(.+)-app\.zip$/i
+    let packages: string[] = []
+    try {
+      const entries = await readdir(downloadDir, { withFileTypes: true })
+      packages = entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
+    } catch {
+      /* 下载目录尚未建立，按空列表处理 */
+    }
+
+    for (const fileName of packages) {
+      const match = packagePattern.exec(fileName)
+      if (!match) continue
+      const version = match[1]
+      if (!isValidVersionDir(version)) continue
+      const full = join(downloadDir, fileName)
+      let archivedAt = new Date(0).toISOString()
+      let sizeBytes = 0
+      try {
+        const info = await stat(full)
+        archivedAt = info.mtime.toISOString()
+        sizeBytes = info.size
+      } catch {
+        /* 文件在扫描期间被删除，保留默认值 */
+      }
+      const existing = byVersion.get(version)
+      if (existing) {
+        // 同版本两处都在：合并占用与时间，升级包同样使条目可回退
+        byVersion.set(version, {
+          ...existing,
+          sizeBytes: existing.sizeBytes + sizeBytes,
+          archivedAt: existing.archivedAt > archivedAt ? existing.archivedAt : archivedAt,
+          launchable: existing.launchable || sizeBytes > 0,
+          source: 'both'
+        })
+      } else {
+        byVersion.set(version, {
+          version,
+          archivedAt,
+          sizeBytes,
+          launchable: sizeBytes > 0,
+          source: 'package'
+        })
+      }
+    }
+
+    const result = [...byVersion.values()]
     result.sort((a, b) => compareVersions(b.version, a.version))
     this.history = result
     this.publish({ canRollback: result.length > 0 })
@@ -595,18 +661,27 @@ export class Updater {
     await this.loadHistory()
   }
 
+  /** 从升级包缓存还原出完整的归档目录，供 switch 脚本就位 */
+  private async restoreArchiveFromPackage(packagePath: string, archiveDir: string): Promise<void> {
+    await extractAppArchive(packagePath, archiveDir)
+  }
+
   /**
    * 回退到指定历史版本：先改写版本状态，再启动 switch 脚本。
    * 历史版本已验证可运行，脚本就位后直接启动并退出，不进入确认等待。
    */
   async rollbackTo(versionId: string): Promise<void> {
     if (!isValidVersionDir(versionId)) throw new Error('版本号不合法')
-    // 直接校验磁盘上的归档目录，不依赖内存列表，避免列表未刷新时误判
-    if (!existsSync(join(this.options.layout.updateHistoryDir, versionId, APP_EXE_NAME))) {
-      throw new Error(`历史版本 ${versionId} 不存在或已损坏`)
-    }
     if (compareVersions(versionId, this.options.appVersion) === 0) {
       throw new Error('不能回退到当前正在运行的版本')
+    }
+    // 归档目录不存在时，尝试从升级包缓存还原。早期版本只留下升级包，没有
+    // 这一步就无法回退。解压后统一走 switch 脚本，两条来源共用同一条路径。
+    const archive = join(this.options.layout.updateHistoryDir, versionId)
+    if (!existsSync(join(archive, APP_EXE_NAME))) {
+      const packagePath = join(this.options.layout.updateDownloadDir, `EnvDock-${versionId}-app.zip`)
+      if (!existsSync(packagePath)) throw new Error(`历史版本 ${versionId} 不存在或已损坏`)
+      await this.restoreArchiveFromPackage(packagePath, archive)
     }
     await this.options.store.updateVersion((draft) => {
       draft.currentVersion = versionId
@@ -633,24 +708,32 @@ export class Updater {
     await this.rollbackTo(target.version)
   }
 
-  /** 删除指定历史版本归档，释放磁盘空间；当前运行版本不可删除 */
+  /** 删除指定历史版本，同时清理归档目录与升级包缓存；当前运行版本不可删除 */
   async discardVersion(versionId: string): Promise<void> {
     if (!isValidVersionDir(versionId)) throw new Error('版本号不合法')
     if (compareVersions(versionId, this.options.appVersion) === 0) {
       throw new Error('当前运行版本不能删除')
     }
     const dir = join(this.options.layout.updateHistoryDir, versionId)
-    if (!existsSync(dir)) {
+    const packagePath = join(this.options.layout.updateDownloadDir, `EnvDock-${versionId}-app.zip`)
+    const hasDir = existsSync(dir)
+    const hasPackage = existsSync(packagePath)
+    if (!hasDir && !hasPackage) {
       await this.loadHistory()
       return
     }
-    const result = await removeDirectoryRobust(dir)
-    if (!result.removed) {
-      const hint = result.residue
-        ? `文件仍被占用，已移至 ${result.residue}，重启后可手动删除`
-        : '目录被占用，请关闭 EnvDock 后手动删除该版本目录'
-      throw new Error(hint)
+
+    if (hasDir) {
+      const result = await removeDirectoryRobust(dir)
+      if (!result.removed) {
+        const hint = result.residue
+          ? `文件仍被占用，已移至 ${result.residue}，重启后可手动删除`
+          : '目录被占用，请关闭 EnvDock 后手动删除该版本目录'
+        throw new Error(hint)
+      }
     }
+    if (hasPackage) await rm(packagePath, { force: true })
+
     await this.loadHistory()
     this.publish({ message: `已删除历史版本 ${versionId}` })
   }

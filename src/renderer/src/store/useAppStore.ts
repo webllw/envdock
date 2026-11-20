@@ -90,7 +90,7 @@ interface AppState {
   rollbackUpdate: () => Promise<void>
   rollbackToVersion: (versionId: string) => Promise<void>
   discardOldVersion: () => Promise<void>
-  discardVersion: (versionId: string) => Promise<void>
+  discardVersion: (versionId: string) => Promise<boolean>
   setUpdSource: (sourceUrl: string, autoCheck: boolean) => Promise<void>
   loadUpdateState: () => Promise<void>
   setUpdateState: (state: UpdateState) => void
@@ -412,8 +412,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.discardVersion(versionId)
       await get().loadUpdateState()
       get().showToast(`历史版本 v${versionId} 已删除`, 'success')
+      return true
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '删除失败', 'warning')
+      return false
     }
   },
 

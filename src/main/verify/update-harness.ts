@@ -140,14 +140,18 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     },
     restart: () => undefined
   })
+  // 下载目录里已有 prepare 缓存的 EnvDock-0.2.0-app.zip，应作为 package 来源并入
   const entries = await listing.loadHistory()
-  const historyListOk = entries.length === 3 &&
-    entries[0].version === '0.1.1' && entries[1].version === '0.1.0' &&
-    entries[2].version === '0.0.9' &&
+  const packageEntry = entries.find((e) => e.version === '0.2.0')
+  const historyListOk = entries.length === 4 &&
+    entries[0].version === '0.2.0' && entries[1].version === '0.1.1' &&
+    entries[2].version === '0.1.0' && entries[3].version === '0.0.9' &&
     entries.find((e) => e.version === '0.1.1')?.launchable === false &&
     entries.find((e) => e.version === '0.1.0')?.launchable === true &&
-    entries[1].sizeBytes > 0 && historyCanRollback === true &&
-    lastHistory === '0.1.1,0.1.0,0.0.9'
+    packageEntry?.source === 'package' && packageEntry.launchable &&
+    packageEntry.sizeBytes > 0 &&
+    entries[2].sizeBytes > 0 && historyCanRollback === true &&
+    lastHistory === '0.2.0,0.1.1,0.1.0,0.0.9'
 
   // 10. 回退到指定版本：损坏版本被拒，合法版本清空挂起并记录目标版本
   let rollbackRejected = false
@@ -189,6 +193,29 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     await stat(v010).then(() => true, () => false) &&
     discardEmittedCanRollback === true && currentRejected
 
+  // 13. 仅有升级包、没有归档目录的版本：可回退（先还原归档），删除时两处都清
+  const v016Package = join(layout.updateDownloadDir, 'EnvDock-0.1.6-app.zip')
+  const AdmZip = (await import('adm-zip')).default
+  const pkgZip = new AdmZip()
+  pkgZip.addFile(APP_EXE_NAME, Buffer.from('fake-exe'))
+  pkgZip.writeZip(v016Package)
+  let packageRollbackStarted = false
+  const packageRollback = new Updater({
+    layout,
+    store: newStore,
+    appVersion: '0.2.0',
+    emit: () => undefined,
+    restart: () => { packageRollbackStarted = true }
+  })
+  await packageRollback.rollbackTo('0.1.6')
+  const restoredExe = join(layout.updateHistoryDir, '0.1.6', APP_EXE_NAME)
+  const packageRollbackOk = packageRollbackStarted &&
+    await stat(restoredExe).then(() => true, () => false)
+
+  await discarding.discardVersion('0.1.6')
+  const packageDiscardOk = await stat(v016Package).then(() => false, () => true) &&
+    await stat(join(layout.updateHistoryDir, '0.1.6')).then(() => false, () => true)
+
   // 12. 旧 app.old 迁移为历史归档，避免升级到新机制后旧版本失联
   const legacy = layout.appBackupDir
   await mkdir(join(legacy, 'resources'), { recursive: true })
@@ -220,6 +247,8 @@ export async function runUpdateHarness(root: string, sourceUrl: string, packageF
     historyListOk,
     rollbackToVersionOk,
     discardOk,
+    packageRollbackOk,
+    packageDiscardOk,
     legacyMigrated,
     phases: events
   }

@@ -108,6 +108,8 @@ const checks = [
   ['历史版本降序列表与可启动判定', result.historyListOk],
   ['回退到指定版本且损坏版本被拒', result.rollbackToVersionOk],
   ['删除指定历史版本且保护当前版本', result.discardOk],
+  ['仅升级包版本可还原后回退', result.packageRollbackOk],
+  ['删除同时清理归档与升级包', result.packageDiscardOk],
   ['旧 app.old 迁移为历史归档', result.legacyMigrated]
 ]
 

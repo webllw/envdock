@@ -165,17 +165,19 @@ export interface VersionState {
 }
 
 /**
- * 一条应用历史版本归档，位于 updates/history/<version>。
- * 目录名即版本号，内容为该版本 app 目录的完整副本。
+ * 一条应用历史版本。来源有两处：updates/history/<version> 的完整目录副本，
+ * 或 updates/download/EnvDock-<version>-app.zip 的升级包缓存。两者都可用于回退。
  */
 export interface AppHistoryEntry {
   version: string
-  /** 归档时间，取目录创建/修改时间，ISO 8601 */
+  /** 归档时间，取来源文件或目录的修改时间，ISO 8601 */
   archivedAt: string
-  /** 归档占用字节数 */
+  /** 来源占用字节数 */
   sizeBytes: number
-  /** 是否含有可执行主程序，可安全回退 */
+  /** 是否可安全回退：目录含主程序，或升级包缓存存在 */
   launchable: boolean
+  /** 实际存在的来源；both 表示目录与升级包都在 */
+  source: 'archive' | 'package' | 'both'
 }
 
 /** 升级流程阶段 */
