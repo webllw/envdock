@@ -25,15 +25,39 @@ export function Settings() {
   const [proxyEnabled, setProxyEnabled] = useState(config.proxy.enabled)
   const [proxyUrl, setProxyUrl] = useState(config.proxy.url)
   const [testingProxy, setTestingProxy] = useState(false)
+  const [npmDirDraft, setNpmDirDraft] = useState(config.npmGlobalDir)
+  const [savingNpmDir, setSavingNpmDir] = useState(false)
 
   // 引导完成后 config 由后端回填，同步草稿，避免界面停留在初始占位值
   useEffect(() => {
     setSourceDraft(config.update.sourceUrl)
     setProxyEnabled(config.proxy.enabled)
     setProxyUrl(config.proxy.url)
-  }, [config.update.sourceUrl, config.proxy.enabled, config.proxy.url])
+    setNpmDirDraft(config.npmGlobalDir)
+  }, [config.update.sourceUrl, config.proxy.enabled, config.proxy.url, config.npmGlobalDir])
 
   const proxyDirty = proxyEnabled !== config.proxy.enabled || proxyUrl !== config.proxy.url
+  const npmDirDirty = npmDirDraft !== config.npmGlobalDir
+
+  /** npm 全局目录只接受环境根目录下的相对路径，校验与后端保持一致 */
+  const isValidNpmDir = (value: string): boolean => {
+    const trimmed = value.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    return trimmed.length > 0 && !/^[A-Za-z]:/.test(trimmed) && !trimmed.split('/').includes('..')
+  }
+
+  const saveNpmDir = async () => {
+    if (!isValidNpmDir(npmDirDraft)) {
+      showToast('请填写环境目录内的相对路径，不能使用盘符或 ..', 'warning')
+      return
+    }
+    setSavingNpmDir(true)
+    try {
+      await setConfig({ npmGlobalDir: npmDirDraft.trim() })
+      showToast('npm 全局目录已更新，后续全局安装将写入新位置', 'success')
+    } finally {
+      setSavingNpmDir(false)
+    }
+  }
 
   const saveProxy = async () => {
     const url = proxyUrl.trim()
@@ -407,6 +431,34 @@ export function Settings() {
               >
                 <span className="switch-knob" />
               </button>
+            </div>
+          </div>
+          <div className={`setting-row ${savingNpmDir ? 'setting-row-busy' : ''}`}>
+            <div className="setting-label">
+              <div className="setting-title">npm 全局目录</div>
+              <div className="setting-hint">
+                npm i -g 的安装位置，切换 Node 版本保持不变；相对环境目录
+                {manifest.installRoot && `：${manifest.installRoot}\\${config.npmGlobalDir.replace(/\//g, '\\')}`}
+              </div>
+            </div>
+            <div className="setting-control">
+              <input
+                className="path-input mono"
+                value={npmDirDraft}
+                onChange={(e) => setNpmDirDraft(e.target.value)}
+                placeholder="global/npm"
+                aria-label="npm 全局目录"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void saveNpmDir()}
+                disabled={!npmDirDirty || savingNpmDir}
+              >
+                {savingNpmDir
+                  ? <><Loader2 size={13} className="spin" /> 保存中</>
+                  : '保存'}
+              </Button>
             </div>
           </div>
           <div className="setting-row">

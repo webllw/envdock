@@ -1,8 +1,9 @@
 /** 验证脚本用的引擎调用入口，不参与应用构建 */
 import { join } from 'node:path'
 import { readFile, stat, writeFile } from 'node:fs/promises'
-import { createLayout } from '@main/core/paths'
-import { Store } from '@main/core/store'
+import { createLayout, normalizeNpmGlobalDir } from '@main/core/paths'
+import { defaultConfig, migrateState, Store } from '@main/core/store'
+import { NodeProvider } from '@main/providers/node'
 import { detectInstalled, extractZip, installSingleFile, writeVersionMetadata } from '@main/providers/runtime'
 import { writeActivationScripts, writeCurrentShims, type ActiveTool } from '@main/core/activations'
 import { pickCompatibleVersion, parsePhpVersionNumber } from '@main/providers/composer'
@@ -109,6 +110,49 @@ export async function runHarness(root: string, archive: string) {
     INTERNAL_TOOL_META.id === 'composer' &&
     !allToolMetadata((await store.getState()).config).some((item) => item.id === 'composer')
 
+  // npm 全局目录：默认位于根目录下，旧配置缺字段时补默认，非法绝对路径被拒绝
+  const npmDefault = defaultConfig().npmGlobalDir === 'global/npm'
+  const npmMigratedDefault = migrateState({ config: { mirror: 'official' } })?.config.npmGlobalDir === 'global/npm'
+  const npmAbsoluteRejected = (() => {
+    try {
+      normalizeNpmGlobalDir('C:\\npm-global')
+      return false
+    } catch {
+      return true
+    }
+  })()
+  const npmTraversalRejected = (() => {
+    try {
+      normalizeNpmGlobalDir('global/../npm')
+      return false
+    } catch {
+      return true
+    }
+  })()
+  const npmNormalized = normalizeNpmGlobalDir('  tools\\npm  ') === 'tools/npm'
+
+  // Node 激活计划注入的全局前缀与缓存都不含版本号，切换版本时保持不变
+  const nodeConfig = { ...defaultConfig(), npmGlobalDir: 'global/npm' }
+  const nodePlan = new NodeProvider(nodeConfig).activate({
+    id: 'v22.11.0', display: '22.11.0', channel: 'lts', releasedAt: ''
+  })
+  const npmPrefixStable = nodePlan.envVars.npm_config_prefix === 'global/npm' &&
+    nodePlan.envVars.npm_config_cache === 'global/npm/cache' &&
+    !nodePlan.envVars.npm_config_prefix.includes('22.11')
+
+  // 垫片与激活脚本把相对前缀写进环境变量，脚本按根目录展开
+  const activeWithNode: ActiveTool[] = [{
+    toolId: 'node',
+    relativeBinDir: 'runtimes/node/v22.11.0',
+    envVars: { ...nodePlan.envVars }
+  }]
+  await writeCurrentShims(layout, activeWithNode)
+  await writeActivationScripts(layout, activeWithNode)
+  const npmShim = await readFile(join(layout.currentBinDir, 'node.cmd'), 'utf8')
+  const npmShimCarriesPrefix = npmShim.includes('npm_config_prefix=') && npmShim.includes('global\\npm')
+  const npmScriptCarriesPrefix = (await readFile(join(layout.scriptsDir, 'activate.ps1'), 'utf8'))
+    .includes("$env:npm_config_prefix = Join-Path $envdockRoot 'global/npm'")
+
   const diskUsage = await store.diskUsage()
 
   return {
@@ -131,6 +175,14 @@ export async function runHarness(root: string, archive: string) {
     pickedUnknown,
     phpVersionParsed,
     composerHidden,
+    npmDefault,
+    npmMigratedDefault,
+    npmAbsoluteRejected,
+    npmTraversalRejected,
+    npmNormalized,
+    npmPrefixStable,
+    npmShimCarriesPrefix,
+    npmScriptCarriesPrefix,
     diskUsage
   }
 }

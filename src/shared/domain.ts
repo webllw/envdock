@@ -237,6 +237,8 @@ export interface AppConfig {
   mirror: 'official' | 'tsinghua' | 'aliyun' | 'huawei'
   /** 是否把 current/bin 写入用户级 PATH */
   pathIntegration: boolean
+  /** npm 全局安装目录，相对环境根目录；切换 Node 版本时保持不变 */
+  npmGlobalDir: string
   /** 应用自身更新源 */
   update: UpdateSourceConfig
   /** 出网代理；关闭时所有请求直连官方源 */

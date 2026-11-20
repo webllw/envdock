@@ -34,6 +34,16 @@ function shimTarget(entry: ShimEntry): string {
   return entry.target ?? `${entry.name}.exe`
 }
 
+/**
+ * PowerShell 单引号字符串转义。
+ *
+ * 相对路径可能来自用户配置，内部单引号必须加倍；路径中的斜杠交给 Join-Path
+ * 处理，不能拆成多个 -Path 参数——Join-Path 只接受一个位置参数。
+ */
+function psLiteral(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
 export interface ActiveTool {
   toolId: ToolId
   relativeBinDir: string
@@ -60,12 +70,12 @@ export async function writeActivationScripts(
   ]
 
   for (const item of active) {
-    psLines.push(`$envdockBin = Join-Path $envdockRoot '${item.relativeBinDir.replace(/\//g, "' -Path '")}'`)
+    psLines.push(`$envdockBin = Join-Path $envdockRoot '${psLiteral(item.relativeBinDir)}'`)
     psLines.push("$env:PATH = $envdockBin + [IO.Path]::PathSeparator + $env:PATH")
     cmdLines.push(`set "ENVDOCK_BIN=%ENVDOCK_ROOT%\\${item.relativeBinDir.replace(/\//g, '\\')}"`)
     cmdLines.push('set "PATH=%ENVDOCK_BIN%;%PATH%"')
     for (const [key, value] of Object.entries(item.envVars)) {
-      psLines.push(`$env:${key} = Join-Path $envdockRoot '${value.replace(/\//g, "' -Path '")}'`)
+      psLines.push(`$env:${key} = Join-Path $envdockRoot '${psLiteral(value)}'`)
       cmdLines.push(`set "${key}=%ENVDOCK_ROOT%\\${value.replace(/\//g, '\\')}"`)
     }
   }
