@@ -22,12 +22,12 @@ import type {
 } from '@shared/domain'
 import { createProviders, allToolMetadata } from '@main/providers/registry'
 import { ComposerProvider } from '@main/providers/composer'
-import { removeVersionDir } from '@main/providers/runtime'
+import { detectInstalled, removeVersionDir } from '@main/providers/runtime'
 import { currentBinRelative, writeActivationScripts, writeCurrentShims, type ActiveTool } from './activations'
 import { cachedFile, downloadAndVerify } from './downloader'
 import { addPathEntry, hasPathEntry, removePathEntry, rollbackMutation } from './system'
 import { createLayout, npmGlobalDir, type Layout } from './paths'
-import { syncNpmGlobalTarget } from './npm-globals'
+import { pruneNpmGlobalBuckets, syncNpmGlobalTarget } from './npm-globals'
 import { setProxyProvider, testProxyConnection } from './net'
 import type { ProxyTestResult } from '@shared/ipc'
 import { Store } from './store'
@@ -35,13 +35,20 @@ import { Updater } from './updater'
 
 export class Engine {
   private readonly updater: Updater
+  private readonly emitStateChanged: () => void
 
   constructor(
     private layout: Layout,
     private readonly store: Store,
     private readonly emitProgress: (event: ProgressEvent) => void,
-    options?: { appVersion: string; emitUpdate: (state: UpdateState) => void; restart: () => void }
+    options?: {
+      appVersion: string
+      emitUpdate: (state: UpdateState) => void
+      restart: () => void
+      emitStateChanged?: () => void
+    }
   ) {
+    this.emitStateChanged = options?.emitStateChanged ?? (() => undefined)
     this.updater = new Updater({
       layout,
       store,
@@ -296,6 +303,7 @@ export class Engine {
     })
     if (toolId === 'node') await this.ensureNpmGlobalDirs()
     await this.refreshActivationArtifacts()
+    this.emitStateChanged()
   }
 
   async deactivate(toolId: ToolId): Promise<void> {
@@ -303,6 +311,7 @@ export class Engine {
       delete draft.activeVersions[toolId]
     })
     await this.refreshActivationArtifacts()
+    this.emitStateChanged()
   }
 
   async uninstallVersion(toolId: ToolId, versionId: string): Promise<void> {
@@ -312,6 +321,12 @@ export class Engine {
       throw new Error('该版本正在激活，请先切换版本')
     }
     await removeVersionDir(this.layout.root, toolId, versionId)
+    if (toolId === 'node') {
+      // 全局包按主版本隔离：删掉最后一个该主版本 Node 时清掉对应 bucket
+      const remaining = await detectInstalled(this.layout.root, 'node')
+      await pruneNpmGlobalBuckets(this.layout.root, remaining.map((item) => item.versionId))
+    }
+    this.emitStateChanged()
   }
 
   private async detectTool(toolId: ToolId) {

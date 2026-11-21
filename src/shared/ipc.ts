@@ -44,7 +44,8 @@ export const IPC_CHANNELS = {
   windowMinimize: 'envdock:window-minimize',
   windowClose: 'envdock:window-close',
   closeRequest: 'envdock:close-request',
-  refreshTray: 'envdock:refresh-tray'
+  refreshTray: 'envdock:refresh-tray',
+  stateChanged: 'envdock:state-changed'
 } as const
 
 /** 安装操作的请求参数 */
@@ -123,4 +124,6 @@ export interface EnvdockApi {
   onUpdateProgress(listener: (event: UpdateState) => void): () => void
   /** 订阅关闭询问；用户点关闭且未记住选择时触发，返回取消订阅函数 */
   onCloseRequest(listener: () => void): () => void
+  /** 订阅全局状态变化；托盘切换版本等非界面操作触发，界面据此重新读取状态 */
+  onStateChanged(listener: () => void): () => void
 }

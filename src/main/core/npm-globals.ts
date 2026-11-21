@@ -11,6 +11,7 @@ import {
   readdir,
   readlink,
   rename,
+  rm,
   rmdir,
   symlink,
   unlink
@@ -126,4 +127,36 @@ export async function syncNpmGlobalTarget(
 
   await symlink(target, activeDir, 'junction')
   return { bucket, changed: true, target }
+}
+
+/**
+ * 删除已无 Node 版本引用的全局包 bucket。
+ *
+ * 全局包按主版本隔离，同一主版本下的多个小版本共用一份 bucket，因此按删除后
+ * 仍在的版本重算所需 bucket，只清理不再需要的那一份，避免误删其他版本的全局
+ * 命令。删除前若入口 junction 正指向它，先摘掉指针，防止入口悬空。
+ * 返回被删除的 bucket 名列表。
+ */
+export async function pruneNpmGlobalBuckets(
+  root: string,
+  remainingVersionIds: string[]
+): Promise<string[]> {
+  const keep = new Set(remainingVersionIds.map((id) => npmBucketName(id)))
+  const entry = await lstat(npmGlobalDir(root)).catch(() => null)
+  const entryTarget = entry?.isSymbolicLink()
+    ? normalizeLinkTarget(await readlink(npmGlobalDir(root)), npmGlobalDir(root))
+    : null
+
+  const removed: string[] = []
+  for (const item of await readdir(npmGlobalStoreDir(root), { withFileTypes: true }).catch(() => [])) {
+    // 只处理 node<N> 形式的 bucket；system、legacy 等非版本目录不纳入清理
+    if (!item.isDirectory() || !/^node\d+$/.test(item.name) || keep.has(item.name)) continue
+    const target = join(npmGlobalStoreDir(root), item.name)
+    if (entryTarget && entryTarget === normalizeLinkTarget(target, npmGlobalDir(root))) {
+      await removeJunctionRobust(npmGlobalDir(root))
+    }
+    await rm(target, { recursive: true, force: true })
+    removed.push(item.name)
+  }
+  return removed
 }

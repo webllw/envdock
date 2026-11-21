@@ -59,5 +59,7 @@ export const api = {
   onProgress: (listener: (event: import('@shared/domain').ProgressEvent) => void) =>
     host?.onProgress(listener) ?? (() => undefined),
   onUpdateProgress: (listener: (event: UpdateState) => void) =>
-    host?.onUpdateProgress(listener) ?? (() => undefined)
+    host?.onUpdateProgress(listener) ?? (() => undefined),
+  onStateChanged: (listener: () => void) =>
+    host?.onStateChanged(listener) ?? (() => undefined)
 }

@@ -113,6 +113,7 @@ export function Runtimes() {
           <span>
             npm 全局目录固定在 <code>global/npm</code>，按 Node 主版本隔离，由 EnvDock 自动管理。
             请勿手动改动该目录或另行设置 npm prefix / cache，否则切换版本后全局命令可能失效。
+            不要用 <code>npm i -g npm</code> 升级 npm，升级后的 npm 只对当前 Node 主版本有效，切换版本后会失效。
           </span>
         </div>
       )}

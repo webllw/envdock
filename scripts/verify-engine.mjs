@@ -67,6 +67,8 @@ const checks = [
   ['npm 垫片携带 npm_config_prefix', result.npmCmdShimCarriesPrefix],
   ['激活脚本按根目录展开 npm 前缀', result.npmScriptCarriesPrefix],
   ['npm 全局目录随 Node 主版本切换', result.globalDirFollowsNode],
+  ['删除版本后清理无引用的全局 bucket', result.node20BucketRemoved],
+  ['仍被引用的全局 bucket 不被误删', result.node22BucketKept],
   ['已安装版本按版本号降序排列', result.installedSortedNewestFirst],
   ['目录占用统计为正数', result.diskUsage > 0]
 ]

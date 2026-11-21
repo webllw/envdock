@@ -79,6 +79,12 @@ const api: EnvdockApi = {
     const handler = (_event: Electron.IpcRendererEvent, payload: UpdateState): void => listener(payload)
     ipcRenderer.on(IPC_CHANNELS.updateProgress, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.updateProgress, handler)
+  },
+
+  onStateChanged: (listener) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC_CHANNELS.stateChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.stateChanged, handler)
   }
 }
 

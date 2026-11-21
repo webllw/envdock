@@ -34,13 +34,17 @@ export default function App() {
     }
   }, [initialize, loadUpdateState, checkUpdate])
 
-  // 从托盘恢复时刷新工具状态：托盘菜单可能已切换全局版本，界面需同步
+  // 托盘切换版本走引擎而非界面 IPC，靠主进程广播即时同步；焦点事件作为兜底
   useEffect(() => {
-    const onFocus = () => {
+    const sync = () => {
       if (useAppStore.getState().ready) void useAppStore.getState().refreshTools()
     }
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    const offStateChanged = api.onStateChanged(sync)
+    window.addEventListener('focus', sync)
+    return () => {
+      offStateChanged()
+      window.removeEventListener('focus', sync)
+    }
   }, [])
 
   useEffect(() => {

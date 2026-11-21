@@ -118,6 +118,8 @@ async function bootstrapEngine(): Promise<Engine> {
   }, {
     appVersion,
     emitUpdate: (state: UpdateState) => broadcast(IPC_CHANNELS.updateProgress, state),
+    // 托盘切换版本不经过界面 IPC，广播通知所有窗口重新读取状态
+    emitStateChanged: () => broadcast(IPC_CHANNELS.stateChanged, undefined),
     // 升级替换脚本会在主进程退出后启动新版本，这里标记退出以绕过托盘隐藏
     restart: quitApp
   })

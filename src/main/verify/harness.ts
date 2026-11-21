@@ -2,7 +2,7 @@
 import { join } from 'node:path'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createLayout, NPM_GLOBAL_DIR, npmGlobalDir } from '@main/core/paths'
-import { npmGlobalStoreDir, syncNpmGlobalTarget } from '@main/core/npm-globals'
+import { npmGlobalStoreDir, pruneNpmGlobalBuckets, syncNpmGlobalTarget } from '@main/core/npm-globals'
 import { defaultConfig, migrateState, Store } from '@main/core/store'
 import { NodeProvider } from '@main/providers/node'
 import { detectInstalled, extractZip, installSingleFile, writeVersionMetadata } from '@main/providers/runtime'
@@ -181,6 +181,12 @@ export async function runHarness(root: string, archive: string) {
 
   const diskUsage = await store.diskUsage()
 
+  // 删除最后一个某主版本 Node 时清理对应全局 bucket，仍被引用的 bucket 保留
+  const prunedBuckets = await pruneNpmGlobalBuckets(root, ['v22.11.0'])
+  const node20BucketRemoved = prunedBuckets.includes('node20') &&
+    !(await stat(join(npmStore, 'node20')).then(() => true).catch(() => false))
+  const node22BucketKept = (await readFile(join(npmStore22, 'pnpm.cmd'), 'utf8')) === 'node22'
+
   return {
     stateInitialized,
     stateRoundTrip,
@@ -209,6 +215,8 @@ export async function runHarness(root: string, archive: string) {
     npmCmdShimCarriesPrefix,
     npmScriptCarriesPrefix,
     globalDirFollowsNode,
+    node20BucketRemoved,
+    node22BucketKept,
     installedSortedNewestFirst,
     diskUsage
   }
