@@ -194,7 +194,6 @@ export class Store {
     await mkdir(this.layout.cacheDir, { recursive: true })
     await mkdir(this.layout.downloadsDir, { recursive: true })
     await mkdir(this.layout.scriptsDir, { recursive: true })
-    await mkdir(this.layout.currentBinDir, { recursive: true })
     await mkdir(this.layout.updatesDir, { recursive: true })
     await mkdir(this.layout.updateDownloadDir, { recursive: true })
     await mkdir(this.layout.updateHistoryDir, { recursive: true })

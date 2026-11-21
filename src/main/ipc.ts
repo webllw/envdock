@@ -6,7 +6,7 @@
  */
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
-import { rm } from 'node:fs/promises'
+import { removeDirectoryRobust } from './core/updater'
 import { IPC_CHANNELS, type ActivationRequest, type InstallRequest, type RelocateRequest } from '@shared/ipc'
 import type { ToolId } from '@shared/domain'
 import { parseRepoSlug } from '@shared/sources'
@@ -128,8 +128,12 @@ export function registerIpc(engine: Engine, windows: WindowActions): void {
     const layout = engine.getLayout()
     // 回滚系统变更，再清理应用本体之外的全部环境数据。
     // app/ 保留：应用正在其中运行无法自删；绿色版的完整卸载由用户删除整个根目录完成。
-    for (const name of ['runtimes', 'cache', 'scripts', 'current', 'updates', 'state.json', 'manifest.json', 'version.json', 'app.old']) {
-      await rm(join(layout.root, name), { recursive: true, force: true })
+    for (const name of ['runtimes', 'cache', 'scripts', 'current', 'global', 'updates', 'state.json', 'manifest.json', 'version.json', 'app.old']) {
+      const target = join(layout.root, name)
+      // 刚升级完的归档常被占用，普通 rm 递归删到深处会抛 ENOTEMPTY 中断卸载；
+      // 改名的残留交给下次启动清理，不阻塞本次卸载。
+      const result = await removeDirectoryRobust(target)
+      if (result.residue) console.warn('[envdock] 卸载残留待清理', result.residue)
     }
   })
 

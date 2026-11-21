@@ -13,7 +13,6 @@ import type {
   VersionInfo
 } from '@shared/domain'
 import { toolMeta } from '@shared/tools'
-import { NPM_GLOBAL_DIR } from '@main/core/paths'
 import { fetchJson, fetchText } from './http'
 import { activeSource } from './sources'
 import { keepLatestPerLine, makeActivationPlan, makeDeactivationPlan, mirrorUrls } from './common'
@@ -114,14 +113,10 @@ export class NodeProvider implements ToolProvider {
 
   activate(version: VersionInfo) {
     const relativeDir = `runtimes/node/${version.id}`
-    // npm 的全局前缀与缓存固定在环境根目录内，不含版本号：PATH、垫片与
-    // junction 指针都以这个入口为准，用户无需也不能改动。
-    // 值为相对路径，由激活脚本与垫片按根目录展开，保持目录可迁移。
-    // Node 可执行文件位于版本根目录，无 bin 子目录
+    // 全局 npm 前缀与缓存由 core/env.ts 按主版本计算并写入注册表，
+    // 这里只保留 HOME 变量以满足 provider 契约；Node 可执行文件在版本根目录。
     return makeActivationPlan(this.id, version, relativeDir, {
-      NODE_HOME: relativeDir,
-      npm_config_prefix: NPM_GLOBAL_DIR,
-      npm_config_cache: `${NPM_GLOBAL_DIR}/cache`
+      NODE_HOME: relativeDir
     }, '')
   }
 

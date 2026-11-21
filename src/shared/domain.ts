@@ -71,17 +71,29 @@ export interface DownloadPlan {
   fallbackUrls?: string[]
 }
 
+/**
+ * EnvDock 实际写入系统的目标，回滚只撤销这一项。
+ *
+ * 不保存用户原值：卸载时变量若仍是 EnvDock 写入的值就删除，若已被用户改动
+ * 或删除则保留现状，避免把用户清理过的环境又写回去。
+ */
+export type EnvOwnership =
+  | { kind: 'path-entry'; entry: string }
+  | { kind: 'env-var'; name: string; value: string }
+
 /** 一次环境变更在系统留下的可回滚记录 */
 export interface SystemMutation {
   id: string
   kind: 'path' | 'registry' | 'shortcut'
   /** 变更位置，例如 HKCU\Environment\Path */
   target: string
-  /** 原值，卸载时恢复；新建项为空 */
+  /** 仅作历史记录，卸载不再据此恢复；新建项为 null */
   previousValue: string | null
   /** 写入的新值 */
   currentValue: string
   createdAt: string
+  /** 回滚依据；旧记录缺失此字段时按兼容分支处理 */
+  ownership?: EnvOwnership
 }
 
 /** 安装清单，记录工具对环境根目录之外的全部改动 */

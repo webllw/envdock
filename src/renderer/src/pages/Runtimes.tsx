@@ -111,9 +111,9 @@ export function Runtimes() {
         <div className="runtime-notice">
           <Info size={14} className="runtime-notice-icon" />
           <span>
-            npm 全局目录固定在 <code>global/npm</code>，按 Node 主版本隔离，由 EnvDock 自动管理。
-            请勿手动改动该目录或另行设置 npm prefix / cache，否则切换版本后全局命令可能失效。
-            不要用 <code>npm i -g npm</code> 升级 npm，升级后的 npm 只对当前 Node 主版本有效，切换版本后会失效。
+            npm 全局包按 Node 主版本隔离，由 <code>npm_config_prefix</code> 自动指向对应目录；
+            pip 全局包由 <code>PYTHONUSERBASE</code> 指向固定目录。切换版本后需重启终端才生效。
+            请勿手动设置这些变量或全局目录，也不要用 <code>npm i -g npm</code> 升级 npm。
           </span>
         </div>
       )}

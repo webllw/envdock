@@ -202,7 +202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       }))
       await get().recheckHealth()
-      get().showToast(`${tool?.displayName ?? toolId} 全局版本已切换`, 'success')
+      get().showToast(`${tool?.displayName ?? toolId} 已切换，重启终端后生效`, 'success')
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '切换失败', 'warning')
     }
@@ -218,7 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       }))
       await get().recheckHealth()
-      get().showToast(`${tool?.displayName ?? toolId} 全局激活已取消`, 'success')
+      get().showToast(`${tool?.displayName ?? toolId} 已取消激活，重启终端后生效`, 'success')
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : '取消全局失败', 'warning')
     }

@@ -1,32 +1,19 @@
 /**
- * npm 全局目录的版本隔离。
+ * 全局包目录的版本隔离。
  *
- * PATH 中只保留一个稳定的入口目录，实际内容按 Node 主版本存放在 siblings
- * store 中。切换版本时重建入口 junction，避免复制全局包，也避免把不兼容的
- * CLI 从一个 Node 版本带到另一个版本。
+ * 全局包按语言主版本放在同级 store 中，切换版本时改写
+ * npm_config_prefix / PYTHONUSERBASE 变量指向对应 bucket。全程不建指针、不复制
+ * 包体：PATH 里引用这些变量，新启动的进程自然落到当前主版本的全局目录。
  */
-import {
-  lstat,
-  mkdir,
-  readdir,
-  readlink,
-  rename,
-  rm,
-  rmdir,
-  symlink,
-  unlink
-} from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import { NPM_GLOBAL_DIR, npmGlobalDir } from './paths'
+import { mkdir, readdir, rm } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import type { ToolId } from '@shared/domain'
 
-/** 全局目录每次同步的结果，changed 表示 junction 目标被重建 */
-export interface NpmGlobalSyncResult {
-  bucket: string
-  changed: boolean
-  target: string
-}
+/** 全局仓库相对根目录的固定位置；入口变量的值都指向这里的具体 bucket */
+export const NPM_STORE_DIR = 'global/npm-store'
+export const PYTHON_STORE_DIR = 'global/python-user'
 
-/** 从 Node 版本标识提取主版本，无法识别时归入 system */
+/** 从版本标识提取主版本，无法识别时归入 system */
 export function npmBucketName(versionId: string | null | undefined): string {
   if (!versionId) return 'system'
   const withoutPrefix = versionId.replace(/^[A-Za-z]+/, '')
@@ -34,129 +21,61 @@ export function npmBucketName(versionId: string | null | undefined): string {
   return Number.isFinite(major) && major > 0 ? `node${major}` : 'system'
 }
 
-/** 由固定入口推导同级的版本仓库路径，避免仓库落到 junction 自身内部 */
-export function npmGlobalStoreDir(root: string): string {
-  return join(resolve(root), dirname(NPM_GLOBAL_DIR), `${basename(NPM_GLOBAL_DIR)}-store`)
+/** Python 原生 wheel 按主次版本 ABI 隔离，例如 3.13.17 -> py313 */
+export function pythonBucketName(versionId: string | null | undefined): string {
+  if (!versionId) return 'system'
+  const matched = versionId.match(/(\d+)\.(\d+)/)
+  return matched ? `py${matched[1]}${matched[2]}` : 'system'
 }
 
-/** 某个 Node 版本对应的实际全局目录 */
-export function npmGlobalTargetDir(root: string, versionId: string | null | undefined): string {
-  return join(npmGlobalStoreDir(root), npmBucketName(versionId))
+export function globalStoreDir(root: string, tool: 'node' | 'python'): string {
+  return join(resolve(root), tool === 'node' ? NPM_STORE_DIR : PYTHON_STORE_DIR)
 }
 
-function normalizeLinkTarget(value: string, from: string): string {
-  const cleaned = value.startsWith('\\\\?\\') ? value.slice(4) : value
-  const absolute = isAbsolute(cleaned) ? cleaned : join(dirname(from), cleaned)
-  return resolve(absolute).toLowerCase()
+export function globalBucketDir(root: string, tool: 'node' | 'python', versionId: string): string {
+  const name = tool === 'node' ? npmBucketName(versionId) : pythonBucketName(versionId)
+  return join(globalStoreDir(root, tool), name)
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, milliseconds))
-}
-
-/** 删除 junction 本身；短暂占用时重试，不触碰链接指向的目录内容 */
-async function removeJunctionRobust(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    try {
-      await unlink(path)
-      return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return
-      if (!code || !['EBUSY', 'EPERM', 'EACCES'].includes(code)) throw error
-      await delay(25 * 2 ** attempt)
-    }
-  }
-  throw new Error(`npm 全局目录入口被占用，无法切换：${path}`)
-}
-
-/** 旧版真实目录迁移到版本仓库；目标非空时保留为带时间戳的 legacy 目录 */
-async function migrateLegacyDirectory(
-  activeDir: string,
-  targetDir: string,
-  storeDir: string,
-  bucket: string
+/** 确保当前激活版本对应的全局 bucket 及其子目录存在 */
+export async function ensureGlobalBuckets(
+  root: string,
+  activeVersions: Partial<Record<ToolId, string>>
 ): Promise<void> {
-  const existing = await readdir(targetDir).catch(() => [])
-  if (existing.length === 0) {
-    await rmdir(targetDir).catch(() => undefined)
-    await rename(activeDir, targetDir)
-    return
+  await mkdir(globalStoreDir(root, 'node'), { recursive: true })
+  await mkdir(globalStoreDir(root, 'python'), { recursive: true })
+  if (activeVersions.node) {
+    const bucket = globalBucketDir(root, 'node', activeVersions.node)
+    await mkdir(join(bucket, 'cache'), { recursive: true })
   }
-  await rename(activeDir, join(storeDir, `${bucket}-legacy-${Date.now()}`))
+  if (activeVersions.python) {
+    const bucket = globalBucketDir(root, 'python', activeVersions.python)
+    await mkdir(join(bucket, 'Scripts'), { recursive: true })
+  }
 }
 
 /**
- * 把稳定入口指向当前 Node 主版本的全局目录。
+ * 删除已无版本引用的全局 bucket。
  *
- * 没有激活 Node 时保留现有指针，避免系统 npm 的全局安装被意外切到空目录。
+ * 同一主版本的多个小版本共用一份 bucket，按删除后仍在的版本重算所需集合，
+ * 只清理不再引用的那份，避免误删其他版本的全局命令。
  */
-export async function syncNpmGlobalTarget(
+export async function pruneGlobalBuckets(
   root: string,
-  versionId: string | null | undefined
-): Promise<NpmGlobalSyncResult> {
-  if (!versionId) {
-    return {
-      bucket: 'system',
-      changed: false,
-      target: npmGlobalTargetDir(root, null)
-    }
-  }
-
-  const activeDir = npmGlobalDir(root)
-  const storeDir = npmGlobalStoreDir(root)
-  const bucket = npmBucketName(versionId)
-  const target = join(storeDir, bucket)
-
-  await mkdir(storeDir, { recursive: true })
-  await mkdir(target, { recursive: true })
-  await mkdir(join(target, 'cache'), { recursive: true })
-
-  const entry = await lstat(activeDir).catch(() => null)
-  if (entry?.isSymbolicLink()) {
-    const current = await readlink(activeDir)
-    if (normalizeLinkTarget(current, activeDir) === normalizeLinkTarget(target, activeDir)) {
-      return { bucket, changed: false, target }
-    }
-    await removeJunctionRobust(activeDir)
-  } else if (entry?.isDirectory()) {
-    await migrateLegacyDirectory(activeDir, target, storeDir, bucket)
-  } else if (entry) {
-    throw new Error(`npm 全局目录入口不是目录，无法切换：${activeDir}`)
-  }
-
-  await symlink(target, activeDir, 'junction')
-  return { bucket, changed: true, target }
-}
-
-/**
- * 删除已无 Node 版本引用的全局包 bucket。
- *
- * 全局包按主版本隔离，同一主版本下的多个小版本共用一份 bucket，因此按删除后
- * 仍在的版本重算所需 bucket，只清理不再需要的那一份，避免误删其他版本的全局
- * 命令。删除前若入口 junction 正指向它，先摘掉指针，防止入口悬空。
- * 返回被删除的 bucket 名列表。
- */
-export async function pruneNpmGlobalBuckets(
-  root: string,
-  remainingVersionIds: string[]
+  remainingByTool: Partial<Record<'node' | 'python', string[]>>
 ): Promise<string[]> {
-  const keep = new Set(remainingVersionIds.map((id) => npmBucketName(id)))
-  const entry = await lstat(npmGlobalDir(root)).catch(() => null)
-  const entryTarget = entry?.isSymbolicLink()
-    ? normalizeLinkTarget(await readlink(npmGlobalDir(root)), npmGlobalDir(root))
-    : null
-
   const removed: string[] = []
-  for (const item of await readdir(npmGlobalStoreDir(root), { withFileTypes: true }).catch(() => [])) {
-    // 只处理 node<N> 形式的 bucket；system、legacy 等非版本目录不纳入清理
-    if (!item.isDirectory() || !/^node\d+$/.test(item.name) || keep.has(item.name)) continue
-    const target = join(npmGlobalStoreDir(root), item.name)
-    if (entryTarget && entryTarget === normalizeLinkTarget(target, npmGlobalDir(root))) {
-      await removeJunctionRobust(npmGlobalDir(root))
+  for (const tool of ['node', 'python'] as const) {
+    const store = globalStoreDir(root, tool)
+    const keep = new Set((remainingByTool[tool] ?? []).map((id) =>
+      tool === 'node' ? npmBucketName(id) : pythonBucketName(id)
+    ))
+    const pattern = tool === 'node' ? /^node\d+$/ : /^py\d+$/
+    for (const item of await readdir(store, { withFileTypes: true }).catch(() => [])) {
+      if (!item.isDirectory() || !pattern.test(item.name) || keep.has(item.name)) continue
+      await rm(join(store, item.name), { recursive: true, force: true })
+      removed.push(`${tool}:${item.name}`)
     }
-    await rm(target, { recursive: true, force: true })
-    removed.push(item.name)
   }
   return removed
 }

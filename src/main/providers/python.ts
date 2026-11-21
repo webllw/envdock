@@ -119,7 +119,7 @@ export class PythonProvider implements ToolProvider {
     const relativeDir = `runtimes/python/${version.id}`
     // 完整运行版 zip 为平铺结构，python.exe 位于版本根目录，无 bin 子目录
     return makeActivationPlan(this.id, version, relativeDir, {
-      // Python 官方识别 PYTHONHOME（无下划线）；垫片与激活脚本据此定位标准库
+      // Python 官方识别 PYTHONHOME（无下划线）；环境变量据此定位标准库
       PYTHONHOME: relativeDir
     }, '')
   }

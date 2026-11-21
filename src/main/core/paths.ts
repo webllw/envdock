@@ -15,7 +15,6 @@ export const LAYOUT = {
   downloads: join('cache', 'downloads'),
   scripts: 'scripts',
   current: 'current',
-  currentBin: join('current', 'bin'),
   app: 'app',
   appBackup: 'app.old',
   stateFile: 'state.json',
@@ -37,7 +36,6 @@ export interface Layout {
   downloadsDir: string
   scriptsDir: string
   currentDir: string
-  currentBinDir: string
   appDir: string
   appBackupDir: string
   stateFile: string
@@ -60,7 +58,6 @@ export function createLayout(root: string): Layout {
     downloadsDir: join(base, LAYOUT.downloads),
     scriptsDir: join(base, LAYOUT.scripts),
     currentDir: join(base, LAYOUT.current),
-    currentBinDir: join(base, LAYOUT.currentBin),
     appDir: join(base, LAYOUT.app),
     appBackupDir: join(base, LAYOUT.appBackup),
     stateFile: join(base, LAYOUT.stateFile),
@@ -106,15 +103,3 @@ export function normalizeTargetRoot(target: string): string {
   return resolve(target)
 }
 
-/**
- * npm 全局目录固定为环境根目录下的 global/npm，不提供配置入口。
- *
- * 固定路径让 PATH、垫片和 junction 指针都以同一个入口为准，
- * 用户无需也不能改动，避免全局包写到根目录之外导致目录不可迁移。
- */
-export const NPM_GLOBAL_DIR = 'global/npm'
-
-/** 由根目录解析出 npm 全局目录入口的绝对路径 */
-export function npmGlobalDir(root: string): string {
-  return join(resolve(root), NPM_GLOBAL_DIR)
-}
